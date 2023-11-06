@@ -7,6 +7,8 @@ import numpy as np
 from torch.nn.modules.utils import _pair
 import timm.data as tdata
 import torch
+from .formating import to_tensor
+from mmcv import digit_version
 
 from ..builder import PIPELINES
 
@@ -2078,3 +2080,82 @@ class MelSpectrogram:
                     f'n_mels={self.n_mels}, '
                     f'fixed_length={self.fixed_length})')
         return repr_str
+
+
+@PIPELINES.register_module()
+class PytorchVideoWrapper:
+    """PytorchVideoTrans Augmentations, under pytorchvideo.transforms.
+
+    Args:
+        op (str): The name of the pytorchvideo transformation.
+    """
+
+    def __init__(self, op, **kwargs):
+        try:
+            import pytorchvideo.transforms as ptv_trans
+            import torch
+        except ImportError:
+            raise RuntimeError('Install pytorchvideo to use PytorchVideoTrans')
+        if digit_version(torch.__version__) < digit_version('1.8.0'):
+            raise RuntimeError(
+                'The version of PyTorch should be at least 1.8.0')
+
+        trans = getattr(ptv_trans, op, None)
+        assert trans, f'Transform {op} not in pytorchvideo'
+
+        supported_pytorchvideo_trans = ('AugMix', 'RandAugment',
+                                        'RandomResizedCrop', 'ShortSideScale',
+                                        'RandomShortSideScale')
+        assert op in supported_pytorchvideo_trans,\
+            f'PytorchVideo Transform {op} is not supported in MMAction2'
+
+        self.trans = trans(**kwargs)
+        self.op = op
+
+    def __call__(self, results):
+        """Perform PytorchVideoTrans augmentations.
+
+        Args:
+            results (dict): The resulting dict to be modified and passed
+                to the next transform in pipeline.
+        """
+        assert 'imgs' in results
+
+        assert 'gt_bboxes' not in results,\
+            f'PytorchVideo {self.op} doesn\'t support bboxes yet.'
+        assert 'proposals' not in results,\
+            f'PytorchVideo {self.op} doesn\'t support bboxes yet.'
+
+        if self.op in ('AugMix', 'RandAugment'):
+            # list[ndarray(h, w, 3)] -> torch.tensor(t, c, h, w)
+            imgs = [x.transpose(2, 0, 1) for x in results['imgs']]
+            imgs = to_tensor(np.stack(imgs))
+        else:
+            # list[ndarray(h, w, 3)] -> torch.tensor(c, t, h, w)
+            # uint8 -> float32
+            imgs = to_tensor((np.stack(results['imgs']).transpose(3, 0, 1, 2) /
+                              255.).astype(np.float32))
+
+        imgs = self.trans(imgs).data.numpy()
+
+        if self.op in ('AugMix', 'RandAugment'):
+            imgs[imgs > 255] = 255
+            imgs[imgs < 0] = 0
+            imgs = imgs.astype(np.uint8)
+
+            # torch.tensor(t, c, h, w) -> list[ndarray(h, w, 3)]
+            imgs = [x.transpose(1, 2, 0) for x in imgs]
+        else:
+            # float32 -> uint8
+            imgs = imgs * 255
+            imgs[imgs > 255] = 255
+            imgs[imgs < 0] = 0
+            imgs = imgs.astype(np.uint8)
+
+            # torch.tensor(c, t, h, w) -> list[ndarray(h, w, 3)]
+            imgs = [x for x in imgs.transpose(1, 2, 3, 0)]
+
+        results['imgs'] = imgs
+
+        return results
+
