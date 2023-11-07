@@ -17,10 +17,12 @@ from .swin2d import SwinTransformer2D
 from .swin2d_adapter import SwinTransformer2D_Adapter
 from .vit_clip import ViT_CLIP
 from .vit_imagenet import ViT_ImageNet
-
+from .vit_clip_zeroI2V import ViT_CLIP_ZEROI2V
+from .vit_clip_flash import ViT_CLIP_FLASH
 
 __all__ = [
     'C3D', 'ResNet', 'ResNet3d', 'ResNetTSM', 'ResNet2Plus1d',
     'ResNet3dSlowFast', 'ResNet3dSlowOnly', 'ResNet3dCSN', 'ResNetTIN', 'X3D',
-    'ResNetAudio', 'ResNet3dLayer', 'MobileNetV2TSM', 'MobileNetV2', 'TANet', 'SwinTransformer3D', 'SwinTransformer2D', 'SwinTransformer2D_Adapter', 'ViT_CLIP', 'ViT_ImageNet'
+    'ResNetAudio', 'ResNet3dLayer', 'MobileNetV2TSM', 'MobileNetV2', 'TANet', 'SwinTransformer3D', 'SwinTransformer2D', 'SwinTransformer2D_Adapter', 'ViT_CLIP', 'ViT_ImageNet',
+    'ViT_CLIP_ZEROI2V','ViT_CLIP_FLASH'
 ]

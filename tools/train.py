@@ -183,16 +183,16 @@ def main():
             mmaction_version=__version__ + get_git_hash(digits=7),
             config=cfg.pretty_text)
 
-    ## freeze some parameters
-    for name, param in model.named_parameters():
-        if 'temporal_embedding' not in name and 'ln_post' not in name and 'cls_head' not in name and 'Adapter' not in name:
-            param.requires_grad = False
+    # ## freeze some parameters
+    # for name, param in model.named_parameters():
+    #     if 'temporal_embedding' not in name and 'ln_post' not in name and 'cls_head' not in name and 'Adapter' not in name:
+    #         param.requires_grad = False
 
-    for name, param in model.named_parameters():
-        logger.info('{}: {}'.format(name, param.requires_grad))
-    num_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    num_total_param = sum(p.numel() for p in model.parameters())
-    logger.info('Number of total parameters: {}, tunable parameters: {}'.format(num_total_param, num_param))
+    # for name, param in model.named_parameters():
+    #     logger.info('{}: {}'.format(name, param.requires_grad))
+    # num_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    # num_total_param = sum(p.numel() for p in model.parameters())
+    # logger.info('Number of total parameters: {}, tunable parameters: {}'.format(num_total_param, num_param))
     
     test_option = dict(test_last=args.test_last, test_best=args.test_best)
     train_model(

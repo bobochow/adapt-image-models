@@ -6,4 +6,5 @@ imgaug==0.4.0
 scipy==1.7.3
 einops==0.4.1
 pyyaml
-yapf
+yapf==0.40.1
+numpy==1.19.5

@@ -7,4 +7,4 @@
 # Evaluation only
 # bash tools/dist_test.sh configs/recognition/vit/vitclip_large_k400.py checkpoints/vit_b_clip_8frame_k400.pth 8 --eval top_k_accuracy
 
-bash tools/dist_train.sh configs/recognition/vit/vitclip_base_hmdb51.py 1 --test-last --validate 
+PORT=29667 bash tools/dist_train.sh configs/recognition/vit/flash_attn/vitclip_flash_base_hmdb51.py 1 --test-last --validate 

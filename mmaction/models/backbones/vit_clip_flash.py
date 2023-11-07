@@ -11,6 +11,8 @@ from einops import rearrange
 from ..builder import BACKBONES
 
 from torch.utils.checkpoint import checkpoint
+from flash_attn.modules.mha import MHA as FlashMHA
+from flash_attn.modules.mlp import Mlp as FlashMlp
 
 class PatchShift(nn.Module):
     def __init__(self, inv=False, ratio=1):
@@ -85,16 +87,27 @@ class QuickGELU(nn.Module):
 class ResidualAttentionBlock(nn.Module):
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_frames=8, drop_path=0.,
                 shift: bool = False, 
-                shift_type: str = 'psm'):
+                shift_type: str = 'psm',
+                use_flash_attn: bool = True):
         super().__init__()
         
-        self.attn = nn.MultiheadAttention(d_model, n_head)
+        # self.attn = nn.MultiheadAttention(d_model, n_head)
+        self.use_flash_attn = use_flash_attn
+        if shift:
+            self.attn = FlashMHA(d_model, n_head, cross_attn=True, dropout=0., use_flash_attn=use_flash_attn)
+        else:
+            self.attn = FlashMHA(d_model, n_head, cross_attn=False, dropout=0., use_flash_attn=use_flash_attn)
+        
         self.ln_1 = LayerNorm(d_model)
-        self.mlp = nn.Sequential(OrderedDict([
-            ("c_fc", nn.Linear(d_model, d_model * 4)),
-            ("gelu", QuickGELU()),
-            ("c_proj", nn.Linear(d_model * 4, d_model))
-        ]))
+        
+        mlp_width = int(d_model * 4)
+        self.mlp = FlashMlp(d_model, hidden_features=mlp_width, activation=QuickGELU())
+        
+        # self.mlp = nn.Sequential(OrderedDict([
+        #     ("c_fc", nn.Linear(d_model, d_model * 4)),
+        #     ("gelu", QuickGELU()),
+        #     ("c_proj", nn.Linear(d_model * 4, d_model))
+        # ]))
         self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
         self.n_head = n_head
@@ -199,48 +212,53 @@ class ResidualAttentionBlock(nn.Module):
         # xn = self.ln_2(x)
         # x = x + self.mlp(xn) + self.drop_path(self.scale * self.MLP_Adapter(xn))
         
-        ## x shape [HW+1, BT, D]
-        n, bt, d = x.shape
+        ## x shape [ BT, HW+1, D]
+        bt, n, d = x.shape
         ## temporal adaptation
         
-        class_token=x[:1,:,:] # 1, BT, D
+        class_token=x[:, :1, :] # BT, 1, D
         
-        xt = rearrange(class_token, 'n (b t) d -> t (b n) d', t=self.num_frames)
+        xt = rearrange(class_token, '(b t) n d -> (b n) t d', t=self.num_frames)
         
-        xt = self.T_Adapter(self.attention(self.ln_1(xt)))
+        ln_xt=self.ln_1(xt)
         
+        # if self.use_flash_attn:
+        if self.shift:
+            xt = self.T_Adapter(self.attn(x=ln_xt,x_kv=ln_xt))
+        else:
+            xt = self.T_Adapter(self.attn(ln_xt))
         
         # xt = self.avgpool(xt.permute(1,2,0))
         
-        xt = rearrange(xt, 't (b n) d -> n (b t) d', n=1)
+        xt = rearrange(xt, '(b n) t d -> (b t) n d', n=1)
         # x = x + self.drop_path(xt)
         # x= torch.cat([x, xt], dim=0)
         
-        x= torch.cat([x[:1,:,:], xt, x[1:,:,:]], dim=0)
+        x= torch.cat([x[:, :1, :], xt, x[:, 1:, :]], dim=1)
         
         ## prompt tuning
         if self.shift:
             xln=self.ln_1(x)
-            tmp_x=xln[2:, :, :].clone()
-            L, NT, C = tmp_x.shape
+            tmp_x=xln[ :, 2:, :].clone()
+            NT, L,  C = tmp_x.shape
             T = self.num_frames
             N = NT // self.num_frames
             H = W = int(L**0.5)
-            tmp_x = rearrange(tmp_x, '(h w) (b t) c -> b t h w c', b=N, t = T, h=H, w=W, c=C)
+            tmp_x = rearrange(tmp_x, '(b t) (h w) c -> b t h w c', b=N, t = T, h=H, w=W, c=C)
             tmp_x = self.shift_op(tmp_x)
             tmp_x = rearrange(tmp_x, 'b t h w c -> (b t) c h w')
-            tmp_x = tmp_x.view(NT, C, -1).permute(2, 0, 1).contiguous() # P NT C
-            tmp_x = torch.cat([xln, tmp_x], dim=0)
+            tmp_x = tmp_x.view(NT, C, -1).permute(0, 2, 1).contiguous() # P NT C
+            tmp_x = torch.cat([xln, tmp_x], dim=1)
             
             # x = x + self.S_Adapter(self.attention(xln)) + self.drop_path(self.S_Adapter(self.cross_attention(xln,tmp_x,tmp_x)))
-            x = x + self.S_Adapter(self.cross_attention(xln,tmp_x))
+            x = x + self.S_Adapter(self.attn(x=xln,x_kv=tmp_x)) 
         else:
             ## spatial adaptation
-            x = x + self.S_Adapter(self.attention(self.ln_1(x)))
+            x = x + self.drop_path(self.S_Adapter(self.attn(self.ln_1(x))))
         
         ## joint adaptation
         # x=x[:-1,:,:]
-        x= torch.cat([x[:1,:,:], x[2:,:,:]], dim=0)
+        x= torch.cat([x[:, :1, :], x[:, 2:, :]], dim=1)
         xn = self.ln_2(x)
         x = x + self.mlp(xn) + self.drop_path(self.scale * self.MLP_Adapter(xn))
         
@@ -248,7 +266,8 @@ class ResidualAttentionBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, scale=1., drop_path=0.1,shift=True,shift_type='psm',checkpoint=False):
+    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, scale=1., drop_path=0.1,
+                shift=True,shift_type='psm',checkpoint=False,use_flash_attn=True):
         super().__init__()
         self.width = width
         self.layers = layers
@@ -266,6 +285,7 @@ class Transformer(nn.Module):
                     dpr[i],
                     shift = shift,
                     shift_type=shift_type,
+                    use_flash_attn=use_flash_attn
                 )
                 for i in range(layers)
             ]
@@ -284,10 +304,10 @@ class Transformer(nn.Module):
 
 
 @BACKBONES.register_module()
-class ViT_CLIP(nn.Module):
+class ViT_CLIP_FLASH(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, adapter_scale=0.5,
-                pretrained=None,shift=False,checkpoint=False):
+                pretrained=None,shift=False,checkpoint=False,use_flash_attn=True):
         super().__init__()
         self.input_resolution = input_resolution
         self.pretrained = pretrained
@@ -303,8 +323,10 @@ class ViT_CLIP(nn.Module):
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         
         self.shift=shift
+        self.use_flash_attn = use_flash_attn
+        self.width=width
 
-        self.transformer = Transformer(num_frames, width, layers, heads, scale=adapter_scale, drop_path=drop_path_rate,shift=shift,checkpoint=checkpoint)
+        self.transformer = Transformer(num_frames, width, layers, heads, scale=adapter_scale, drop_path=drop_path_rate,shift=shift,checkpoint=checkpoint,use_flash_attn=use_flash_attn)
 
         self.ln_post = LayerNorm(width)
 
@@ -332,7 +354,39 @@ class ViT_CLIP(nn.Module):
             pretrain_dict = clip_model.visual.state_dict()
             del clip_model
             del pretrain_dict['proj']
-            msg = self.load_state_dict(pretrain_dict, strict=False)
+            
+            if not self.shift:
+                swaps = [('attn.in_proj_weight', 'attn.Wqkv.weight'), ('attn.in_proj_bias', 'attn.Wqkv.bias'),
+                    ('attn.out_proj.weight','attn.out_proj.weight'),('attn.out_proj.bias','attn.out_proj.bias'),
+                    ('mlp.c_fc.weight','mlp.fc1.weight'),('mlp.c_fc.bias','mlp.fc1.bias'),
+                    ('mlp.c_proj.weight','mlp.fc2.weight'),('mlp.c_proj.bias','mlp.fc2.bias')]
+            else:
+                swaps = [('attn.in_proj_weight', 'attn.Wq.weight','attn.Wkv.weight'), ('attn.in_proj_bias', 'attn.Wq.bias','attn.Wkv.bias'),
+                    ('attn.out_proj.weight','attn.out_proj.weight'),('attn.out_proj.bias','attn.out_proj.bias'),
+                    ('mlp.c_fc.weight','mlp.fc1.weight'),('mlp.c_fc.bias','mlp.fc1.bias'),
+                    ('mlp.c_proj.weight','mlp.fc2.weight'),('mlp.c_proj.bias','mlp.fc2.bias')]
+            
+            out_dict={}
+            for k, v in pretrain_dict.items():
+                flag=True
+                for sp in swaps:
+                    if sp[0] in k:
+                        if len(sp)==2:
+                            k = k.replace(sp[0], sp[1])
+                            out_dict[k] = v
+                        else:
+                            k2=k
+                            k = k.replace(sp[0], sp[1])
+                            out_dict[k] = v[:self.width]
+                            k2 = k2.replace(sp[0], sp[2])
+                            out_dict[k2] = v[self.width:]
+                        flag=False
+                if flag:
+                    out_dict[k]=v
+            
+            msg = self.load_state_dict(out_dict, strict=False)
+            
+            # msg = self.load_state_dict(pretrain_dict, strict=False)
             logger.info('Missing keys: {}'.format(msg.missing_keys))
             logger.info('Unexpected keys: {}'.format(msg.unexpected_keys))
             logger.info(f"=> loaded successfully '{self.pretrained}'")
@@ -405,9 +459,9 @@ class ViT_CLIP(nn.Module):
             
         x = self.ln_pre(x)
 
-        x = x.permute(1, 0, 2)  # NLD -> LND
+        # x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
-        x = x.permute(1, 0, 2)  # LND -> NLD
+        # x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
