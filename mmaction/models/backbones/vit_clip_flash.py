@@ -359,12 +359,14 @@ class ViT_CLIP_FLASH(nn.Module):
                 swaps = [('attn.in_proj_weight', 'attn.Wqkv.weight'), ('attn.in_proj_bias', 'attn.Wqkv.bias'),
                     ('attn.out_proj.weight','attn.out_proj.weight'),('attn.out_proj.bias','attn.out_proj.bias'),
                     ('mlp.c_fc.weight','mlp.fc1.weight'),('mlp.c_fc.bias','mlp.fc1.bias'),
-                    ('mlp.c_proj.weight','mlp.fc2.weight'),('mlp.c_proj.bias','mlp.fc2.bias')]
+                    ('mlp.c_proj.weight','mlp.fc2.weight'),('mlp.c_proj.bias','mlp.fc2.bias')
+                    ]
             else:
                 swaps = [('attn.in_proj_weight', 'attn.Wq.weight','attn.Wkv.weight'), ('attn.in_proj_bias', 'attn.Wq.bias','attn.Wkv.bias'),
                     ('attn.out_proj.weight','attn.out_proj.weight'),('attn.out_proj.bias','attn.out_proj.bias'),
                     ('mlp.c_fc.weight','mlp.fc1.weight'),('mlp.c_fc.bias','mlp.fc1.bias'),
-                    ('mlp.c_proj.weight','mlp.fc2.weight'),('mlp.c_proj.bias','mlp.fc2.bias')]
+                    ('mlp.c_proj.weight','mlp.fc2.weight'),('mlp.c_proj.bias','mlp.fc2.bias')
+                    ]
             
             out_dict={}
             for k, v in pretrain_dict.items():
@@ -426,7 +428,7 @@ class ViT_CLIP_FLASH(nn.Module):
         for name, param in self.named_parameters():
             if 'temporal_embedding' not in name and 'ln_post' not in name and 'Adapter' not in name and 'cls_head' not in name:
                 param.requires_grad = False
-
+        logger = get_root_logger()
         for name, param in self.named_parameters():
             logger.info(f'{name}: {param.requires_grad}')
         num_param = sum(p.numel() for p in self.parameters() if p.requires_grad)

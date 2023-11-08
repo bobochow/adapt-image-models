@@ -157,7 +157,7 @@ class SampleFrames:
             ratio = (num_frames - ori_clip_len + 1.0) / self.num_clips
             clip_offsets = np.around(np.arange(self.num_clips) * ratio)
         else:
-            clip_offsets = np.zeros((self.num_clips, ), dtype=np.int)
+            clip_offsets = np.zeros((self.num_clips, ), dtype=np.int_)
 
         return clip_offsets
 
@@ -179,11 +179,11 @@ class SampleFrames:
         avg_interval = (num_frames - ori_clip_len + 1) / float(self.num_clips)
         if num_frames > ori_clip_len - 1:
             base_offsets = np.arange(self.num_clips) * avg_interval
-            clip_offsets = (base_offsets + avg_interval / 2.0).astype(np.int)
+            clip_offsets = (base_offsets + avg_interval / 2.0).astype(np.int_)
             if self.twice_sample:
                 clip_offsets = np.concatenate([clip_offsets, base_offsets])
         else:
-            clip_offsets = np.zeros((self.num_clips, ), dtype=np.int)
+            clip_offsets = np.zeros((self.num_clips, ), dtype=np.int_)
         return clip_offsets
 
     def _sample_clips(self, num_frames):
@@ -260,7 +260,7 @@ class SampleFrames:
             start_index = results['start_index']
             frame_inds = np.concatenate(frame_inds) + start_index
 
-        results['frame_inds'] = frame_inds.astype(np.int)
+        results['frame_inds'] = frame_inds.astype(np.int_)
         results['clip_len'] = self.clip_len
         results['frame_interval'] = self.frame_interval
         results['num_clips'] = self.num_clips
@@ -324,7 +324,7 @@ class UntrimmedSampleFrames:
         frame_inds = np.clip(frame_inds, 0, total_frames - 1)
 
         frame_inds = np.concatenate(frame_inds) + start_index
-        results['frame_inds'] = frame_inds.astype(np.int)
+        results['frame_inds'] = frame_inds.astype(np.int_)
         results['clip_len'] = self.clip_len
         results['frame_interval'] = self.frame_interval
         results['num_clips'] = num_clips
@@ -468,7 +468,7 @@ class SampleAVAFrames(SampleFrames):
             size=self.clip_len)
         frame_inds = self._get_clips(center_index, skip_offsets, shot_info)
 
-        results['frame_inds'] = np.array(frame_inds, dtype=np.int)
+        results['frame_inds'] = np.array(frame_inds, dtype=np.int_)
         results['clip_len'] = self.clip_len
         results['frame_interval'] = self.frame_interval
         results['num_clips'] = 1
@@ -556,7 +556,7 @@ class SampleProposalFrames(SampleFrames):
             offsets = base_offsets + np.random.randint(
                 avg_interval, size=num_segments)
         else:
-            offsets = np.zeros((num_segments, ), dtype=np.int)
+            offsets = np.zeros((num_segments, ), dtype=np.int_)
 
         return offsets
 
@@ -579,9 +579,9 @@ class SampleProposalFrames(SampleFrames):
         if valid_length >= num_segments:
             avg_interval = valid_length / float(num_segments)
             base_offsets = np.arange(num_segments) * avg_interval
-            offsets = (base_offsets + avg_interval / 2.0).astype(np.int)
+            offsets = (base_offsets + avg_interval / 2.0).astype(np.int_)
         else:
-            offsets = np.zeros((num_segments, ), dtype=np.int)
+            offsets = np.zeros((num_segments, ), dtype=np.int_)
 
         return offsets
 
@@ -672,7 +672,7 @@ class SampleProposalFrames(SampleFrames):
         """
         ori_clip_len = self.clip_len * self.frame_interval
         return np.arange(
-            0, num_frames - ori_clip_len, self.test_interval, dtype=np.int)
+            0, num_frames - ori_clip_len, self.test_interval, dtype=np.int_)
 
     def _sample_clips(self, num_frames, proposals):
         """Choose clip offsets for the video in a given mode.
@@ -716,7 +716,7 @@ class SampleProposalFrames(SampleFrames):
         start_index = results['start_index']
         frame_inds = np.mod(frame_inds, total_frames) + start_index
 
-        results['frame_inds'] = np.array(frame_inds).astype(np.int)
+        results['frame_inds'] = np.array(frame_inds).astype(np.int_)
         results['clip_len'] = self.clip_len
         results['frame_interval'] = self.frame_interval
         results['num_clips'] = (
@@ -1672,4 +1672,82 @@ class LoadProposals:
                     f'pgm_features_dir={self.pgm_features_dir}, '
                     f'proposal_ext={self.proposal_ext}, '
                     f'feature_ext={self.feature_ext})')
+        return repr_str
+
+@PIPELINES.register_module()
+class FusedDecordInit:
+    """Using decord to initialize the video_reader.
+
+    Decord: https://github.com/dmlc/decord
+
+    Required keys are "filename",
+    added or modified keys are "video_reader" and "total_frames".
+    """
+
+    def __init__(self, io_backend='disk', num_threads=1,
+                fast_rrc=False, rrc_params=(224, (0.5, 1.0)),
+                fast_msc=False, msc_params=(224,),
+                fast_cc=False, cc_params=(224,),
+                hflip_prob=0., vflip_prob=0.,
+                **kwargs):
+        self.io_backend = io_backend
+        self.num_threads = num_threads
+        self.kwargs = kwargs
+        self.file_client = None
+        
+        if fast_rrc:
+            self.width, self.height = rrc_params[0], rrc_params[0]
+        elif fast_msc:
+            self.width, self.height = msc_params[0], msc_params[0]
+        elif fast_cc:
+            self.width, self.height = cc_params[0], cc_params[0]
+        else:
+            self.width, self.height = -1, -1
+        self.hflip_prob=hflip_prob
+        self.vflip_prob=vflip_prob
+        self.fast_rrc=fast_rrc
+        self.fast_msc=fast_msc
+        self.fast_cc=fast_cc
+        self.rrc_params=rrc_params
+        self.msc_params=msc_params
+        self.cc_params=cc_params
+
+    def __call__(self, results):
+        """Perform the Decord initialization.
+
+        Args:
+            results (dict): The resulting dict to be modified and passed
+                to the next transform in pipeline.
+        """
+        try:
+            import decord
+        except ImportError:
+            raise ImportError(
+                'Please run "pip install decord" to install Decord first.')
+
+        if self.file_client is None:
+            self.file_client = FileClient(self.io_backend, **self.kwargs)
+
+        file_obj = io.BytesIO(self.file_client.get(results['filename']))
+        # container = decord.VideoReader(file_obj, num_threads=self.num_threads)
+        if self.fast_rrc or self.fast_msc or self.fast_cc:
+            container = decord.VideoReader(
+                    file_obj, num_threads=self.num_threads,
+                    width=self.width, height=self.height,
+                    use_rrc=self.fast_rrc, scale_min=self.rrc_params[1][0], scale_max=self.rrc_params[1][1],
+                    use_msc=self.fast_msc,
+                    use_centercrop=self.fast_cc,
+                    hflip_prob=self.hflip_prob, vflip_prob=self.vflip_prob,
+                )
+        else:
+            container = decord.VideoReader(file_obj, num_threads=self.num_threads)
+        
+        results['video_reader'] = container
+        results['total_frames'] = len(container)
+        return results
+
+    def __repr__(self):
+        repr_str = (f'{self.__class__.__name__}('
+                    f'io_backend={self.io_backend}, '
+                    f'num_threads={self.num_threads})')
         return repr_str
