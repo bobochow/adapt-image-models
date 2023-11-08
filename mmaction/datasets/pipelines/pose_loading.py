@@ -122,7 +122,7 @@ class UniformSampleFrames:
         start_index = results['start_index']
         inds = inds + start_index
 
-        results['frame_inds'] = inds.astype(np.int)
+        results['frame_inds'] = inds.astype(np.int_)
         results['clip_len'] = self.clip_len
         results['frame_interval'] = None
         results['num_clips'] = self.num_clips
