@@ -3,7 +3,7 @@ _base_ = [
 ]
 # model settings
 model = dict(
-    backbone=dict(drop_path_rate=0.2, adapter_scale=0.5, num_frames=32, pretrained='openaiclip',
+    backbone=dict(drop_path_rate=0.2, adapter_scale=0.5, num_frames=32, num_tadapter=1,pretrained='openaiclip',
                 shift=True,checkpoint=False),
     cls_head=dict(num_classes=51),
     test_cfg=dict(max_testing_views=4),
@@ -140,20 +140,20 @@ find_unused_parameters = False
 project='vitclip_hmdb51'
 name='tps_apex_imgaug'
 
-work_dir = f'./work_dirs/{project}/{name}'
+work_dir = f'./work_dirs/hmdb51/{project}/{name}'
 
 
 log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=True),
-        dict(
-            type='WandbLoggerHook',
-            init_kwargs=dict(
-                project=project, name=name
-                ),
-            ),
-        dict(type='TensorboardLoggerHook',log_dir='/root/tf-logs/hmdb51/{name}')
+        # dict(
+        #     type='WandbLoggerHook',
+        #     init_kwargs=dict(
+        #         project=project, name=name
+        #         ),
+        #     ),
+        # dict(type='TensorboardLoggerHook',log_dir='/root/tf-logs/hmdb51/{project}/{name}')
         ]
 )
 
