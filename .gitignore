@@ -133,3 +133,5 @@ work_dirs_vit/
 # avoid soft links created by MIM
 mmaction/configs/*
 mmaction/tools/*
+
+wandb/
