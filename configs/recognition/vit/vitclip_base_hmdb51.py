@@ -3,10 +3,9 @@ _base_ = [
 ]
 # model settings
 model = dict(
-    backbone=dict(drop_path_rate=0.2, adapter_scale=0.5, num_frames=32, pretrained='openaiclip',
-                shift=True,checkpoint=False),
+    backbone=dict(drop_path_rate=0.2, adapter_scale=0.5, num_frames=32, num_tadapter=1,pretrained='openaiclip'),
     cls_head=dict(num_classes=51),
-    test_cfg=dict(max_testing_views=4),
+    # test_cfg=dict(max_testing_views=4),
     
     )
 
@@ -28,12 +27,12 @@ train_pipeline = [
     dict(type='RandomResizedCrop'),
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Flip', flip_ratio=0.5),
-    dict(type='Imgaug', transforms=[dict(type='RandAugment', n=4, m=7)]),
-    # dict(
-    #     type='PytorchVideoWrapper',
-    #     op='RandAugment',
-    #     magnitude=7,
-    #     num_layers=4),
+    # dict(type='Imgaug', transforms=[dict(type='RandAugment', n=4, m=7)]),
+    dict(
+        type='PytorchVideoWrapper',
+        op='RandAugment',
+        magnitude=7,
+        num_layers=4),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='RandomErasing', probability=0.25),
     dict(type='FormatShape', input_format='NCTHW'),
@@ -77,12 +76,12 @@ test_pipeline = [
     dict(type='ToTensor', keys=['imgs'])
 ]
 
-batchsize=8*4
+batchsize=46
 data = dict(
     videos_per_gpu=batchsize,
-    workers_per_gpu=8,
+    workers_per_gpu=2,
     val_dataloader=dict(
-        videos_per_gpu=1,
+        videos_per_gpu=batchsize,
         workers_per_gpu=1
     ),
     test_dataloader=dict(
@@ -140,20 +139,20 @@ find_unused_parameters = False
 project='vitclip_hmdb51'
 name='tps_apex_imgaug'
 
-work_dir = f'./work_dirs/{project}/{name}'
+work_dir = f'./work_dirs/hmdb51/{project}/{name}'
 
 
 log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=True),
-        dict(
-            type='WandbLoggerHook',
-            init_kwargs=dict(
-                project=project, name=name
-                ),
-            ),
-        dict(type='TensorboardLoggerHook',log_dir='/root/tf-logs/hmdb51/{name}')
+        # dict(
+        #     type='WandbLoggerHook',
+        #     init_kwargs=dict(
+        #         project=project, name=name
+        #         ),
+        #     ),
+        # dict(type='TensorboardLoggerHook',log_dir='/root/tf-logs/hmdb51/{project}/{name}')
         ]
 )
 
