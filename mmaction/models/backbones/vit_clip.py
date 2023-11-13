@@ -372,7 +372,7 @@ class ViT_CLIP(nn.Module):
         for name, param in self.named_parameters():
             if 'temporal_embedding' not in name and 'ln_post' not in name and 'Adapter' not in name and 'cls_head' not in name:
                 param.requires_grad = False
-
+        logger = get_root_logger()
         for name, param in self.named_parameters():
             logger.info(f'{name}: {param.requires_grad}')
         num_param = sum(p.numel() for p in self.parameters() if p.requires_grad)

@@ -3,7 +3,7 @@ _base_ = [
 ]
 # model settings
 model = dict(
-    backbone=dict(type='ViT_CLIP',drop_path_rate=0.2, adapter_scale=0.5, num_frames=8,with_t_cls_token=True,linear_adapter=False,bottleneck=192,share_adapter=False,pretrained='openaiclip'),
+    backbone=dict(type='ViT_CLIP_ZEROI2V',drop_path_rate=0.2, adapter_scale=0.5, num_frames=8,with_t_cls_token=True,linear_adapter=False,bottleneck=192,share_adapter=False,pretrained='openaiclip'),
     cls_head=dict(num_classes=174),
     test_cfg=dict(max_testing_views=2), 
     train_cfg=dict(blending=dict(type='LabelSmoothing', num_classes=174, smoothing=0.1))

@@ -424,6 +424,7 @@ class ViT_CLIP_ZEROI2V(nn.Module):
             logger.info(f"=> loaded successfully '{self.pretrained}'")
             torch.cuda.empty_cache()
         elif self.pretrained is None:
+            logger = get_root_logger()
             logger.info('No pretrained weights are loaded!!!!!')
             self.apply(_init_weights)
         else:
@@ -461,7 +462,7 @@ class ViT_CLIP_ZEROI2V(nn.Module):
         for name, param in self.named_parameters():
             if 'temporal_embedding' not in name and 'ln_post' not in name and 'cls_head' not in name and 'Adapter' not in name and 'shift_conv' not in name:
                 param.requires_grad = False
-
+        logger = get_root_logger()
         for name, param in self.named_parameters():
             logger.info(f'{name}: {param.requires_grad}')
         

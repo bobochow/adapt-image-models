@@ -1,12 +1,22 @@
 _base_ = [
-    '../../_base_/models/vitclip_base.py', '../../_base_/default_runtime.py'
+    '../../../_base_/models/vitclip_base.py', '../../../_base_/default_runtime.py'
 ]
 # model settings
 model = dict(
-    backbone=dict(type='ViT_CLIP',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,with_t_cls_token=True,linear_adapter=False,bottleneck=192,share_adapter=False,pretrained='openaiclip'),
+    backbone=dict(type='ViT_CLIP_ZEROI2V',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,with_t_cls_token=True,linear_adapter=False,bottleneck=192,share_adapter=False,pretrained='openaiclip'),
     cls_head=dict(num_classes=48),
-    test_cfg=dict(max_testing_views=4)
+    # test_cfg=dict(max_testing_views=4)
     )
+
+module_hooks = [
+    dict(
+        type='GPUNormalize',
+        hooked_module='backbone',
+        hook_pos='forward_pre',
+        input_format='NCTHW',
+        mean=[122.769, 116.74, 104.04],
+        std=[68.493, 66.63, 70.321])
+]
 
 # dataset settings
 dataset_type = 'VideoDataset'
@@ -18,35 +28,36 @@ ann_file_test = 'data/diving48/diving48_val_list_videos.txt'
 img_norm_cfg = dict(
     mean=[122.769, 116.74, 104.04], std=[68.493, 66.63, 70.321], to_bgr=False)
 train_pipeline = [
-    dict(type='DecordInit'),
-    dict(type='SampleFrames', clip_len=32, frame_interval=8, num_clips=1, frame_uniform=True),
+    # dict(type='DecordInit'),
+    dict(type='FusedDecordInit',fast_rrc=True,rrc_params=(224, (0.5, 1.0)),hflip_prob=0.5),
+    dict(type='SampleFrames', clip_len=32, frame_interval=16, num_clips=1, frame_uniform=True),
     dict(type='DecordDecode'),
-    dict(type='Resize', scale=(-1, 256)),
-    dict(type='RandomResizedCrop'),
-    dict(type='Resize', scale=(224, 224), keep_ratio=False),
-    dict(type='Flip', flip_ratio=0.5),
-    dict(type='Imgaug', transforms=[dict(type='RandAugment', n=4, m=7)]),
-    dict(type='Normalize', **img_norm_cfg),
-    dict(type='RandomErasing', probability=0.25),
+    # dict(type='Resize', scale=(-1, 256)),
+    # dict(type='RandomResizedCrop'),
+    # dict(type='Resize', scale=(224, 224), keep_ratio=False),
+    # dict(type='Flip', flip_ratio=0.5),
+    # dict(type='Imgaug', transforms=[dict(type='RandAugment', n=4, m=7)]),
+    # dict(type='Normalize', **img_norm_cfg),
+    # dict(type='RandomErasing', probability=0.25),
     dict(type='FormatShape', input_format='NCTHW'),
     dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
     dict(type='ToTensor', keys=['imgs', 'label'])
 ]
 val_pipeline = [
-    dict(type='DecordInit'),
+    # dict(type='DecordInit'),
+    dict(type='FusedDecordInit',fast_rcc=True,cc_params=(224,)),
     dict(
         type='SampleFrames',
         clip_len=32,
-        frame_interval=8,
+        frame_interval=16,
         num_clips=1,
         frame_uniform=True,
         test_mode=True),
     dict(type='DecordDecode'),
-    dict(type='Resize', scale=(-1, 256)),
-    dict(type='CenterCrop', crop_size=224),
-    dict(type='Flip', flip_ratio=0),
-    dict(type='Normalize', **img_norm_cfg),
-    # dict(type='RandomErasing', probability=0.25),
+    # dict(type='Resize', scale=(-1, 256)),
+    # dict(type='CenterCrop', crop_size=224),
+    # dict(type='Flip', flip_ratio=0),
+    # dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCTHW'),
     dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
     dict(type='ToTensor', keys=['imgs'])
@@ -56,7 +67,7 @@ test_pipeline = [
     dict(
         type='SampleFrames',
         clip_len=32,
-        frame_interval=8,
+        frame_interval=16,
         num_clips=1,
         frame_uniform=True,
         test_mode=True),
@@ -64,23 +75,23 @@ test_pipeline = [
     dict(type='Resize', scale=(-1, 224)),
     dict(type='ThreeCrop', crop_size=224),
     dict(type='Flip', flip_ratio=0),
-    dict(type='Normalize', **img_norm_cfg),
+    # dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCTHW'),
     dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
     dict(type='ToTensor', keys=['imgs'])
 ]
 
-batchsize=64
+batchsize=8*8
 data = dict(
     videos_per_gpu=batchsize,
-    workers_per_gpu=2,
-    val_dataloader=dict(
-        videos_per_gpu=1,
-        workers_per_gpu=1
-    ),
+    workers_per_gpu=4,
+    # val_dataloader=dict(
+    #     videos_per_gpu=1,
+    #     workers_per_gpu=1
+    # ),
     test_dataloader=dict(
-        videos_per_gpu=1,
-        workers_per_gpu=1
+        videos_per_gpu=32,
+        workers_per_gpu=4
     ),
     train=dict(
         type=dataset_type,
@@ -105,7 +116,7 @@ base_lr=3e-4
 
 actual_lr=base_lr*batchsize/64
 # optimizer
-optimizer = dict(type='AdamW', lr=base_lr, betas=(0.9, 0.999), weight_decay=0.05,
+optimizer = dict(type='AdamW', lr=actual_lr, betas=(0.9, 0.999), weight_decay=0.05,
                  paramwise_cfg=dict(custom_keys={'class_embedding': dict(decay_mult=0.),
                                                  'positional_embedding': dict(decay_mult=0.),
                                                  'ln_1': dict(decay_mult=0.),
@@ -118,43 +129,37 @@ lr_config = dict(
     min_lr=0,
     warmup='linear',
     warmup_by_epoch=True,
-    warmup_iters=2.5
+    warmup_iters=3
 )
 total_epochs = 50
 
 # runtime settings
-checkpoint_config = dict(interval=2,max_keep_ckpts=1)
+checkpoint_config = dict(interval=10,max_keep_ckpts=1)
 
 find_unused_parameters = False
 
 
-project='vitclip_zeroI2V_base_diving48'
-name='exp_ths_tcls_ada_all_apex_acc_test'
+project='vitclip_diving48'
+name='ths_tcls_ada_apex_acc'
 
 work_dir = f'./work_dirs/diving48/{project}/{name}'
 
 log_config = dict(
-    interval=200,
+    interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=True,
             ),
-        # dict(
-        #     type='WandbLoggerHook',
-        #     init_kwargs=dict(
-        #         project=project, name=name
-        #         ),
-        #     ),
-        # dict(type='TensorboardLoggerHook',
-        #     )
+        dict(
+            type='WandbLoggerHook',
+            init_kwargs=dict(
+                project=project, name=name,
+                resume=True,id='bdoe2b68'
+                ),
+            ),
+        dict(type='TensorboardLoggerHook',
+            )
         ]
     )
-
-# custom_hooks = [
-#     dict(
-#         type='GradientCumulativeFp16OptimizerHook',
-#         cumulative_iters=8
-#     )
-# ]
 
 # do not use mmdet version fp16
 fp16 = None
