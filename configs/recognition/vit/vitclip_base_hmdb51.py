@@ -5,7 +5,7 @@ _base_ = [
 model = dict(
     backbone=dict(drop_path_rate=0.2, adapter_scale=0.5,pretrained='openaiclip',shift=False,checkpoint=False),
     cls_head=dict(num_classes=51),
-    # test_cfg=dict(max_testing_views=4),
+    test_cfg=dict(max_testing_views=4),
     
     )
 
