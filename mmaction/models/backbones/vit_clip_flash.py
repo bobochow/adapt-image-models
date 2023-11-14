@@ -116,7 +116,8 @@ class ResidualAttentionBlock(nn.Module):
         # self.avgpool= nn.AdaptiveAvgPool1d(1)
 
         self.MLP_Adapter = Adapter(d_model, skip_connect=False)
-        self.S_Adapter = Adapter(d_model)
+        # self.S_Adapter = Adapter(d_model)
+        self.S_Adapter = Adapter(d_model,skip_connect=False)
         self.scale = scale
         self.T_Adapter = Adapter(d_model, skip_connect=False)
         # if num_tadapter == 2:
@@ -223,10 +224,10 @@ class ResidualAttentionBlock(nn.Module):
         ln_xt=self.ln_1(xt)
         
         # if self.use_flash_attn:
-        if self.shift:
-            xt = self.T_Adapter(self.attn(x=ln_xt,x_kv=ln_xt))
-        else:
-            xt = self.T_Adapter(self.attn(ln_xt))
+        # if self.shift:
+        #     xt = self.T_Adapter(self.attn(x=ln_xt,x_kv=ln_xt))
+        # else:
+        xt = self.T_Adapter(self.attn(ln_xt))
         
         # xt = self.avgpool(xt.permute(1,2,0))
         
@@ -251,10 +252,15 @@ class ResidualAttentionBlock(nn.Module):
             tmp_x = torch.cat([xln, tmp_x], dim=1)
             
             # x = x + self.S_Adapter(self.attention(xln)) + self.drop_path(self.S_Adapter(self.cross_attention(xln,tmp_x,tmp_x)))
-            x = x + self.S_Adapter(self.attn(x=xln,x_kv=tmp_x)) 
+            # x = x + self.S_Adapter(self.attn(x=xln,x_kv=tmp_x)) 
+            x = x + self.S_Adapter(self.attn(tmp_x)[:,:xln.shape[1],:]) 
+            
+            # x = x + self.attn(tmp_x)[:,:xln.shape[1],:] + self.drop_path(self.S_Adapter(xln))
+            
         else:
             ## spatial adaptation
-            x = x + self.drop_path(self.S_Adapter(self.attn(self.ln_1(x))))
+            # x = x + self.drop_path(self.S_Adapter(self.attn(self.ln_1(x))))
+            x = x + self.attn(self.ln_1(x)) + self.drop_path(self.scale * self.S_Adapter(x))
         
         ## joint adaptation
         # x=x[:-1,:,:]
