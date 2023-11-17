@@ -103,7 +103,7 @@ class ResidualAttentionBlock(nn.Module):
         # self.avgpool= nn.AdaptiveAvgPool1d(1)
 
         self.MLP_Adapter = Adapter(d_model, skip_connect=False)
-        self.S_Adapter = Adapter(d_model)
+        self.S_Adapter = Adapter(d_model, skip_connect=False)
         self.scale = scale
         self.T_Adapter = Adapter(d_model, skip_connect=False)
         # if num_tadapter == 2:
@@ -147,7 +147,8 @@ class ResidualAttentionBlock(nn.Module):
             aff = (q @ k.transpose(-2, -1) / (self.attn.head_dim**0.5)) # (N, num_heads, Tx, Ty)
             
             if need_weights:
-                weights=torch.sum(torch.exp(torch.mean(aff,1)).view(N,-1),-1)
+                with torch.no_grad():
+                    weights=torch.sum(torch.exp(torch.mean(aff,1)).view(N,-1),-1)
             
             aff = aff.softmax(dim=-1)
             
@@ -161,7 +162,7 @@ class ResidualAttentionBlock(nn.Module):
             return out
 
     def cross_attention(
-            self, x: torch.Tensor ,y: torch.Tensor
+            self, x: torch.Tensor ,y: torch.Tensor , need_weights=False
         ) -> Tuple[torch.Tensor, torch.Tensor]:
             
             q = (x @ self.attn.in_proj_weight[:self.d_model].T
@@ -182,9 +183,16 @@ class ResidualAttentionBlock(nn.Module):
             
             aff = aff.softmax(dim=-1)
             
+            if need_weights:
+                with torch.no_grad():
+                    weights=torch.sum(torch.exp(torch.mean(aff,1)).view(N,-1),-1)
+            
             out = aff @ v  # N num_heads Tx D_head
             out = out.permute(2, 0, 1, 3).flatten(2)
             out = self.attn.out_proj(out) # N Tx D
+            
+            if need_weights:
+                return out , weights
             
             return out
     
@@ -227,18 +235,29 @@ class ResidualAttentionBlock(nn.Module):
         ## prompt tuning
         if self.shift:
             xln=self.ln_1(x)
-            # tmp_x=xln[2:, :, :].clone()
-            # L, NT, C = tmp_x.shape
-            # T = self.num_frames
-            # N = NT // self.num_frames
-            # H = W = int(L**0.5)
-            # tmp_x = rearrange(tmp_x, '(h w) (b t) c -> b t h w c', b=N, t = T, h=H, w=W, c=C)
-            # tmp_x = self.shift_op(tmp_x)
-            # tmp_x = rearrange(tmp_x, 'b t h w c -> (b t) c h w')
-            # tmp_x = tmp_x.view(NT, C, -1).permute(2, 0, 1).contiguous() # P NT C
+            tmp_x=xln[2:, :, :].clone()
+            L, NT, C = tmp_x.shape
+            T = self.num_frames
+            N = NT // self.num_frames
+            H = W = int(L**0.5)
+            tmp_x = rearrange(tmp_x, '(h w) (b t) c -> b t h w c', b=N, t = T, h=H, w=W, c=C)
+            tmp_x = self.shift_op(tmp_x)
+            tmp_x = rearrange(tmp_x, 'b t h w c -> (b t) c h w')
+            tmp_x = tmp_x.view(NT, C, -1).permute(2, 0, 1).contiguous() # P NT C
             # tmp_x = torch.cat([xln, tmp_x], dim=0)
             
-            # x = x + self.S_Adapter(self.attention(xln)) + self.drop_path(self.S_Adapter(self.cross_attention(xln,tmp_x)))
+            # ori_attn, ori_weight = self.attention(xln,need_weights=True)
+            # crs_attn, crs_weight = self.cross_attention(xln, tmp_x, need_weights=True)
+            # with torch.no_grad():
+            #     lamda=crs_weight/(crs_weight+ori_weight) # NT 1
+            # # del ori_weight, crs_weight, tmp_x
+            # lamda=lamda.unsqueeze(0).unsqueeze(-1) # 1 NT 1            
+            # x = x + (1-lamda) * ori_attn + lamda * crs_attn + self.drop_path(self.scale * self.S_Adapter(x))
+            
+            x = x + 0.5 * self.attention(xln) + 0.5 * self.cross_attention(xln, tmp_x) + self.drop_path(self.scale * self.S_Adapter(x))
+            
+            # x = x + self.attention(xln) + self.drop_path(self.S_Adapter(self.scale * self.cross_attention(xln,tmp_x)))
+            
             # x = x + self.S_Adapter(self.cross_attention(xln,tmp_x))
             
         else:

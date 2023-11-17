@@ -97,6 +97,7 @@ class ResidualAttentionBlock(nn.Module):
             self.attn = FlashMHA(d_model, n_head, cross_attn=True, dropout=0., use_flash_attn=use_flash_attn)
         else:
             self.attn = FlashMHA(d_model, n_head, cross_attn=False, dropout=0., use_flash_attn=use_flash_attn)
+        # self.attn = FlashMHA(d_model, n_head, cross_attn=False, dropout=0., use_flash_attn=use_flash_attn)
         
         self.ln_1 = LayerNorm(d_model)
         
@@ -251,11 +252,15 @@ class ResidualAttentionBlock(nn.Module):
             tmp_x = tmp_x.view(NT, C, -1).permute(0, 2, 1).contiguous() # P NT C
             tmp_x = torch.cat([xln, tmp_x], dim=1)
             
-            # x = x + self.S_Adapter(self.attention(xln)) + self.drop_path(self.S_Adapter(self.cross_attention(xln,tmp_x,tmp_x)))
-            # x = x + self.S_Adapter(self.attn(x=xln,x_kv=tmp_x)) 
-            x = x + self.S_Adapter(self.attn(tmp_x)[:,:xln.shape[1],:]) 
+            # x = x + self.S_Adapter(self.attn(x=xln,x_kv=tmp_x))
             
-            # x = x + self.attn(tmp_x)[:,:xln.shape[1],:] + self.drop_path(self.S_Adapter(xln))
+            # x = x + self.attn(x=xln,x_kv=xln) + self.drop_path(self.scale * self.S_Adapter(self.attn(x=xln,x_kv=tmp_x)))
+            
+            # x = x + 0.5 * self.attn(x=xln,x_kv=xln) + 0.5 * self.attn(x=xln,x_kv=tmp_x) + self.drop_path(self.scale * self.S_Adapter(x))
+            
+            # x = x + self.attn(x=tmp_x,x_kv=tmp_x)[:,:xln.shape[1],:] + self.drop_path(self.scale * self.S_Adapter(x))
+            
+            x = x + self.drop_path(self.scale * self.S_Adapter(self.attn(x=tmp_x,x_kv=tmp_x)[:,:xln.shape[1],:]))
             
         else:
             ## spatial adaptation
