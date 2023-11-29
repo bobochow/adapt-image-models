@@ -1,11 +1,12 @@
 _base_ = [
-    '../../_base_/models/vitclip_base.py', '../../_base_/default_runtime.py'
+    '../../../_base_/models/vitclip_base.py', '../../../_base_/default_runtime.py'
 ]
 # model settings
 model = dict(
-    backbone=dict(drop_path_rate=0.2, adapter_scale=0.5,pretrained='openaiclip',shift=False,checkpoint=False),
-    cls_head=dict(num_classes=51),
-    # test_cfg=dict(max_testing_views=8),
+    backbone=dict(type='AIM',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,pretrained='openaiclip',
+                prompt=True,wind_attn=True,window_size= (32,2,2),not_shift=False),
+    cls_head=dict(num_classes=48),
+    # test_cfg=dict(max_testing_views=8)
 )
 
 module_hooks = [
@@ -20,21 +21,21 @@ module_hooks = [
 
 # dataset settings
 dataset_type = 'VideoDataset'
-data_root = 'data/hmdb51/videos'
-data_root_val = 'data/hmdb51/videos'
-ann_file_train = 'data/hmdb51/hmdb51_train_split_1_videos.txt'
-ann_file_val = 'data/hmdb51/hmdb51_val_split_1_videos.txt'
-ann_file_test = 'data/hmdb51/hmdb51_val_split_1_videos.txt'
+data_root = 'data/diving48/videos'
+data_root_val = 'data/diving48/videos'
+ann_file_train = 'data/diving48/diving48_train_list_videos.txt'
+ann_file_val = 'data/diving48/diving48_val_list_videos.txt'
+ann_file_test = 'data/diving48/diving48_val_list_videos.txt'
 
 img_norm_cfg = dict(
     mean=[122.769, 116.74, 104.04], std=[68.493, 66.63, 70.321], to_bgr=False)
 train_pipeline = [
     # dict(type='DecordInit'),
-    dict(type='FusedDecordInit',fast_rrc=True,rrc_params=(224, (0.5, 1.0)),hflip_prob=0.5,num_threads=8),
+    dict(type='FusedDecordInit',fast_rrc=True,rrc_params=(224, (0.5, 1.0)),hflip_prob=0.5),
     dict(type='SampleFrames', clip_len=32, frame_interval=16, num_clips=1, frame_uniform=True),
     dict(type='DecordDecode'),
     # dict(type='Resize', scale=(-1, 256)),
-    # dict(type='RandomResizedCrop'),
+    # dict(type='RandomResizedCrop', area_range=(0.5, 1.0)),
     # dict(type='Resize', scale=(224, 224), keep_ratio=False),
     # dict(type='Flip', flip_ratio=0.5),
     # dict(type='Imgaug', transforms=[dict(type='RandAugment', n=4, m=7)]),
@@ -51,7 +52,7 @@ train_pipeline = [
 ]
 val_pipeline = [
     # dict(type='DecordInit'),
-    dict(type='FusedDecordInit',fast_rcc=True,cc_params=(224,),num_threads=8),
+    dict(type='FusedDecordInit',fast_rcc=True,cc_params=(224,)),
     dict(
         type='SampleFrames',
         clip_len=32,
@@ -80,24 +81,24 @@ test_pipeline = [
     dict(type='DecordDecode'),
     dict(type='Resize', scale=(-1, 224)),
     dict(type='ThreeCrop', crop_size=224),
-    # dict(type='Flip', flip_ratio=0),
+    dict(type='Flip', flip_ratio=0),
     # dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCTHW'),
     dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
     dict(type='ToTensor', keys=['imgs'])
 ]
 
-batchsize=8*8
+batchsize=8*6
 data = dict(
     videos_per_gpu=batchsize,
-    workers_per_gpu=2,
+    workers_per_gpu=4,
     val_dataloader=dict(
-        videos_per_gpu=8,
-        workers_per_gpu=2
+        videos_per_gpu=batchsize,
+        workers_per_gpu=4
     ),
     test_dataloader=dict(
-        videos_per_gpu=1,
-        workers_per_gpu=1
+        videos_per_gpu=8*2,
+        workers_per_gpu=4
     ),
     train=dict(
         type=dataset_type,
@@ -116,7 +117,7 @@ data = dict(
         pipeline=test_pipeline))
 
 evaluation = dict(
-    interval=1, metrics=['top_k_accuracy', 'mean_class_accuracy'])
+    interval=2, metrics=['top_k_accuracy', 'mean_class_accuracy'])
 
 
 base_lr=3e-4
@@ -138,8 +139,7 @@ lr_config = dict(
     warmup_by_epoch=True,
     warmup_iters=2.5
 )
-
-total_epochs = 20
+total_epochs = 50
 
 # runtime settings
 checkpoint_config = dict(interval=5,max_keep_ckpts=1)
@@ -147,23 +147,24 @@ checkpoint_config = dict(interval=5,max_keep_ckpts=1)
 find_unused_parameters = False
 
 
-project='vitclip_hmdb51'
-name='baseline_restuning_prompt_lamda_apex_gpunorm_exp2'
+project='vitclip_diving48'
+name='aim_tcls_shift_2x32_apex_fd_gpunorm'
 
-work_dir = f'./work_dirs/hmdb51/{project}/{name}'
+work_dir = f'./work_dirs/diving48/{project}/{name}'
 
 
 log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=True),
-        # dict(
-        #     type='WandbLoggerHook',
-        #     init_kwargs=dict(
-        #         project=project, name=name
-        #         ),
-        #     ),
-        # dict(type='TensorboardLoggerHook')
+        dict(
+            type='WandbLoggerHook',
+            init_kwargs=dict(
+                project=project, name=name,
+                # resume=True,id='vqqhlmu2'
+                ),
+            ),
+        dict(type='TensorboardLoggerHook')
         ]
 )
 
@@ -177,3 +178,5 @@ optimizer_config = dict(
     bucket_size_mb=-1,
     use_fp16=True,
 )
+
+# workflow = [('train', 1), ('val', 1)]

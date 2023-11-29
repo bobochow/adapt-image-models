@@ -4,7 +4,7 @@ _base_ = [
 # model settings
 model = dict(
     backbone=dict(type='ViT_CLIP_FLASH',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,pretrained='openaiclip',
-                shift=False,use_flash_attn=True,checkpoint=True),
+                shift=True,use_flash_attn=True,checkpoint=False),
     cls_head=dict(num_classes=51),
     test_cfg=dict(max_testing_views=4)
     )
@@ -74,21 +74,21 @@ test_pipeline = [
     dict(
         type='SampleFrames',
         clip_len=32,
-        frame_interval=8,
+        frame_interval=16,
         num_clips=1,
         frame_uniform=True,
         test_mode=True),
     dict(type='DecordDecode'),
     dict(type='Resize', scale=(-1, 224)),
     dict(type='ThreeCrop', crop_size=224),
-    dict(type='Flip', flip_ratio=0),
+    # dict(type='Flip', flip_ratio=0),
     # dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCTHW'),
     dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
     dict(type='ToTensor', keys=['imgs'])
 ]
 
-batchsize=8*48
+batchsize=8*8
 
 data = dict(
     videos_per_gpu=batchsize,
@@ -121,9 +121,9 @@ evaluation = dict(
     interval=1, metrics=['top_k_accuracy', 'mean_class_accuracy'])
 
 
-base_lr=3e-5
+base_lr=3e-4
 
-actual_lr=base_lr*batchsize/64*8
+actual_lr=base_lr*batchsize/64
 # optimizer
 optimizer = dict(type='AdamW', lr=actual_lr, betas=(0.9, 0.999), weight_decay=0.05,
                  paramwise_cfg=dict(custom_keys={'class_embedding': dict(decay_mult=0.),
@@ -140,29 +140,30 @@ lr_config = dict(
     warmup_by_epoch=True,
     warmup_iters=3
 )
+
 total_epochs = 30
 
 # runtime settings
-checkpoint_config = dict(interval=10,max_keep_ckpts=1)
+checkpoint_config = dict(interval=5,max_keep_ckpts=1)
 
 find_unused_parameters = False
 
 
 project='vitclip_hmdb51'
-name='tps_flash_apex_fd_gpunorm_8x36'
+name='tps_restuning_crsall_flash_apex_fd_gpunorm'
 
 work_dir = f'./work_dirs/hmdb51/{project}/{name}'
 
 
 log_config = dict(
-    interval=20,
+    interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=True,
             ),
         dict(
             type='WandbLoggerHook',
             init_kwargs=dict(
-                project=project, name=name
+                project=project, name=name, resume=True,id='z8nuivp1'
                 ),
             ),
         dict(type='TensorboardLoggerHook',
@@ -181,4 +182,4 @@ optimizer_config = dict(
     use_fp16=True,
 )
 
-workflow = [('train', 1), ('val', 1)]
+# workflow = [('train', 1), ('val', 1)]

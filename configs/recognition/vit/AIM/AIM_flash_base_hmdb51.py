@@ -4,9 +4,9 @@ _base_ = [
 # model settings
 model = dict(
     backbone=dict(type='AIM_FLASH',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,pretrained='openaiclip',
-                use_flash_attn=True,checkpoint=False),
+                use_flash_attn=True,checkpoint=False,prompt=True,wind_attn=True,window_size= (16,7,7),not_shift=True,win_prompt=True),
     cls_head=dict(num_classes=51),
-    test_cfg=dict(max_testing_views=8)
+    # test_cfg=dict(max_testing_views=8)
     )
 
 module_hooks = [
@@ -30,7 +30,7 @@ img_norm_cfg = dict(
     mean=[122.769, 116.74, 104.04], std=[68.493, 66.63, 70.321], to_bgr=False)
 train_pipeline = [
     # dict(type='DecordInit'),
-    dict(type='FusedDecordInit',fast_rrc=True,rrc_params=(224, (0.5, 1.0)),hflip_prob=0.5),
+    dict(type='FusedDecordInit',fast_rrc=True,rrc_params=(224, (0.4, 1.0)),hflip_prob=0.5),
     dict(type='SampleFrames', clip_len=32, frame_interval=16, num_clips=1, frame_uniform=True),
     dict(type='DecordDecode'),
     # dict(type='Resize', scale=(-1, 256)),
@@ -81,6 +81,7 @@ test_pipeline = [
     dict(type='DecordDecode'),
     dict(type='Resize', scale=(-1, 224)),
     dict(type='ThreeCrop', crop_size=224),
+    # dict(type='CenterCrop', crop_size=224),
     # dict(type='Flip', flip_ratio=0),
     # dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCTHW'),
@@ -89,17 +90,17 @@ test_pipeline = [
 ]
 
 batchsize=8*8
-
+gpu_nums=2
 data = dict(
     videos_per_gpu=batchsize,
     workers_per_gpu=2,
     val_dataloader=dict(
-        videos_per_gpu=1,
-        workers_per_gpu=1,
+        videos_per_gpu=batchsize,
+        workers_per_gpu=2,
     ),
     test_dataloader=dict(
-        videos_per_gpu=1,
-        workers_per_gpu=1
+        videos_per_gpu=8*2,
+        workers_per_gpu=2
     ),
     train=dict(
         type=dataset_type,
@@ -123,9 +124,14 @@ evaluation = dict(
 
 base_lr=3e-4
 
-actual_lr=base_lr*batchsize/64
+actual_lr=base_lr*batchsize*gpu_nums/64
+
+# base_lr=1e-4
+
+# actual_lr=base_lr*batchsize/128
+
 # optimizer
-optimizer = dict(type='AdamW', lr=actual_lr, betas=(0.9, 0.999), weight_decay=0.05,
+optimizer = dict(type='AdamW', lr=actual_lr, betas=(0.9, 0.999), weight_decay=5e-2,
                  paramwise_cfg=dict(custom_keys={'class_embedding': dict(decay_mult=0.),
                                                  'positional_embedding': dict(decay_mult=0.),
                                                  'ln_1': dict(decay_mult=0.),
@@ -138,19 +144,19 @@ lr_config = dict(
     min_lr=0,
     warmup='linear',
     warmup_by_epoch=True,
-    warmup_iters=3
+    warmup_iters=2.5
 )
 
 total_epochs = 30
 
 # runtime settings
-checkpoint_config = dict(interval=5,max_keep_ckpts=1)
+checkpoint_config = dict(interval=1,max_keep_ckpts=1)
 
 find_unused_parameters = False
 
 
 project='vitclip_hmdb51'
-name='aim_tcls_flash_apex_fd_gpunorm'
+name='aim_flash_tcls_7x16_apex_gpunorm_win_prompt_exp3'
 
 work_dir = f'./work_dirs/hmdb51/{project}/{name}'
 
@@ -163,11 +169,11 @@ log_config = dict(
         dict(
             type='WandbLoggerHook',
             init_kwargs=dict(
-                project=project, name=name, 
+                project=project, name=name,
+                resume=True,id='717ysu26'
                 ),
             ),
-        dict(type='TensorboardLoggerHook',
-            )
+        dict(type='TensorboardLoggerHook')
         ]
     )
 

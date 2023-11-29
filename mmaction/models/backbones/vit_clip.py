@@ -148,7 +148,7 @@ class ResidualAttentionBlock(nn.Module):
             
             if need_weights:
                 with torch.no_grad():
-                    weights=torch.sum(torch.exp(torch.mean(aff,1)).view(N,-1),-1)
+                    weights=torch.sum(torch.exp(torch.sum(aff,1)).view(N,-1),-1)
             
             aff = aff.softmax(dim=-1)
             
@@ -181,11 +181,11 @@ class ResidualAttentionBlock(nn.Module):
             
             aff = (q @ k.transpose(-2, -1) / (self.attn.head_dim**0.5)) # (N, num_heads, Tx, Ty)
             
-            aff = aff.softmax(dim=-1)
-            
             if need_weights:
                 with torch.no_grad():
-                    weights=torch.sum(torch.exp(torch.mean(aff,1)).view(N,-1),-1)
+                    weights=torch.sum(torch.exp(torch.sum(aff,1)).view(N,-1),-1)
+            
+            aff = aff.softmax(dim=-1)
             
             out = aff @ v  # N num_heads Tx D_head
             out = out.permute(2, 0, 1, 3).flatten(2)
@@ -228,9 +228,6 @@ class ResidualAttentionBlock(nn.Module):
         
         xt = rearrange(xt, 't (b n) d -> n (b t) d', n=1)
         # x = x + self.drop_path(xt)
-        # x= torch.cat([x, xt], dim=0)
-        
-        x= torch.cat([x[:1,:,:], xt, x[1:,:,:]], dim=0)
         
         ## prompt tuning
         if self.shift:
@@ -263,11 +260,28 @@ class ResidualAttentionBlock(nn.Module):
         else:
             ## spatial adaptation
             # x = x + self.S_Adapter(self.attention(self.ln_1(x)))
-            x = x + self.attention(self.ln_1(x)) + self.drop_path(self.scale * self.S_Adapter(x))
+            
+            ori_attn, ori_weight = self.attention(self.ln_1(x), need_weights=True)
+            crs_attn, crs_weight = self.cross_attention(self.ln_1(x), xt, need_weights=True)
+            
+            # ori_attn_sum = torch.sum(torch.exp(torch.mean(ori_attn.abs(),-1)),0)
+            # crs_attn_sum = torch.sum(torch.exp(torch.mean(crs_attn.abs(),-1)),0)
+            
+            # lam=crs_attn_sum/(ori_attn_sum+crs_attn_sum)
+            
+            lamda=crs_weight/(crs_weight+ori_weight)
+            # err=(lamda-lam).abs().max().item()
+            lamda=lamda.unsqueeze(0).unsqueeze(-1)
+            x = x + (1-lamda) * ori_attn + self.drop_path(self.scale * self.S_Adapter(lamda * crs_attn))
+            
+            # x= torch.cat([x[:1,:,:], xt, x[1:,:,:]], dim=0)
+            # x = x + self.attention(self.ln_1(x)) + self.drop_path(self.scale * self.S_Adapter(x))
+            # x= torch.cat([x[:1,:,:], x[2:,:,:]], dim=0)
         
         ## joint adaptation
         # x=x[:-1,:,:]
-        x= torch.cat([x[:1,:,:], x[2:,:,:]], dim=0)
+        
+        
         xn = self.ln_2(x)
         x = x + self.mlp(xn) + self.drop_path(self.scale * self.MLP_Adapter(xn))
         

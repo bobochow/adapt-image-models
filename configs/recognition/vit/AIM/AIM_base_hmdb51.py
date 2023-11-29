@@ -4,9 +4,8 @@ _base_ = [
 # model settings
 model = dict(
     backbone=dict(type='AIM',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,pretrained='openaiclip',
-                ),
+                prompt=True,wind_attn=True,window_size= (32,2,2),not_shift=False),
     cls_head=dict(num_classes=51),
-    test_cfg=dict(max_testing_views=8)
     )
 
 module_hooks = [
@@ -56,7 +55,7 @@ val_pipeline = [
     dict(
         type='SampleFrames',
         clip_len=32,
-        frame_interval=8,
+        frame_interval=16,
         num_clips=1,
         frame_uniform=True,
         test_mode=True),
@@ -88,7 +87,7 @@ test_pipeline = [
     dict(type='ToTensor', keys=['imgs'])
 ]
 
-batchsize=8*8
+batchsize=8*6
 
 data = dict(
     videos_per_gpu=batchsize,
@@ -138,19 +137,19 @@ lr_config = dict(
     min_lr=0,
     warmup='linear',
     warmup_by_epoch=True,
-    warmup_iters=3
+    warmup_iters=2.5
 )
 
 total_epochs = 30
 
 # runtime settings
-checkpoint_config = dict(interval=5,max_keep_ckpts=1)
+checkpoint_config = dict(interval=2,max_keep_ckpts=1)
 
 find_unused_parameters = False
 
 
 project='vitclip_hmdb51'
-name='aim_apex_fd_gpunorm'
+name='aim_tcls_shift_2x32_apex_fd_gpunorm'
 
 work_dir = f'./work_dirs/hmdb51/{project}/{name}'
 
@@ -164,6 +163,7 @@ log_config = dict(
             type='WandbLoggerHook',
             init_kwargs=dict(
                 project=project, name=name, 
+                resume=True,id='ol5kkevn'
                 ),
             ),
         dict(type='TensorboardLoggerHook',

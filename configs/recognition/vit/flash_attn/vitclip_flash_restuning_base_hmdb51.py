@@ -6,7 +6,7 @@ model = dict(
     backbone=dict(type='ViT_CLIP_FLASH_RES_TUNING',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,pretrained='openaiclip',
                 shift=False,use_flash_attn=True,checkpoint=False),
     cls_head=dict(num_classes=51),
-    test_cfg=dict(max_testing_views=4),
+    # test_cfg=dict(max_testing_views=4),
     # train_cfg=dict(blending=dict(type='LabelSmoothing', num_classes=151, smoothing=0.1))
     )
 
@@ -31,7 +31,7 @@ img_norm_cfg = dict(
     mean=[122.769, 116.74, 104.04], std=[68.493, 66.63, 70.321], to_bgr=False)
 train_pipeline = [
     # dict(type='DecordInit'),
-    dict(type='FusedDecordInit',fast_rrc=True,rrc_params=(224, (0.5, 1.0)),hflip_prob=0.5),
+    dict(type='FusedDecordInit',fast_rrc=True,rrc_params=(224, (0.4, 1.0)),hflip_prob=0.5),
     dict(type='SampleFrames', clip_len=32, frame_interval=16, num_clips=1, frame_uniform=True),
     dict(type='DecordDecode'),
     # dict(type='Resize', scale=(-1, 256)),
@@ -57,7 +57,7 @@ val_pipeline = [
     dict(
         type='SampleFrames',
         clip_len=32,
-        frame_interval=8,
+        frame_interval=16,
         num_clips=1,
         frame_uniform=True,
         test_mode=True),
@@ -75,7 +75,7 @@ test_pipeline = [
     dict(
         type='SampleFrames',
         clip_len=32,
-        frame_interval=8,
+        frame_interval=16,
         num_clips=1,
         frame_uniform=True,
         test_mode=True),
@@ -89,14 +89,14 @@ test_pipeline = [
     dict(type='ToTensor', keys=['imgs'])
 ]
 
-batchsize=4*12
+batchsize=8*8
 
 data = dict(
     videos_per_gpu=batchsize,
     workers_per_gpu=2,
     val_dataloader=dict(
-        videos_per_gpu=1,
-        workers_per_gpu=1,
+        videos_per_gpu=8,
+        workers_per_gpu=2,
     ),
     test_dataloader=dict(
         videos_per_gpu=1,
@@ -125,6 +125,11 @@ evaluation = dict(
 base_lr=3e-4
 
 actual_lr=base_lr*batchsize/64
+
+# base_lr=1e-4
+
+# actual_lr=base_lr*batchsize/128
+
 # optimizer
 optimizer = dict(type='AdamW', lr=actual_lr, betas=(0.9, 0.999), weight_decay=0.05,
                  paramwise_cfg=dict(custom_keys={'class_embedding': dict(decay_mult=0.),
@@ -132,25 +137,27 @@ optimizer = dict(type='AdamW', lr=actual_lr, betas=(0.9, 0.999), weight_decay=0.
                                                  'ln_1': dict(decay_mult=0.),
                                                  'ln_2': dict(decay_mult=0.),
                                                  'ln_pre': dict(decay_mult=0.),
-                                                 'ln_post': dict(decay_mult=0.),}))
+                                                 'ln_post': dict(decay_mult=0.),
+                                                 'prompt_weight': dict(decay_mult=0.)
+                                                 }))
 # learning policy
 lr_config = dict(
     policy='CosineAnnealing',
-    min_lr=1e-5,
+    min_lr=0,
     warmup='linear',
     warmup_by_epoch=True,
-    warmup_iters=3
+    warmup_iters=2.5
 )
 total_epochs = 30
 
 # runtime settings
-checkpoint_config = dict(interval=10,max_keep_ckpts=1)
+checkpoint_config = dict(interval=5,max_keep_ckpts=1)
 
 find_unused_parameters = False
 
 
 project='vitclip_hmdb51'
-name='baseline_restuning_dual_flash_apex_fd_gpunorm'
+name='baseline_restuning_prompt_flash_apex_fd_gpunorm'
 
 work_dir = f'./work_dirs/hmdb51/{project}/{name}'
 
@@ -175,7 +182,7 @@ log_config = dict(
 fp16 = None
 optimizer_config = dict(
     type="DistOptimizerHook",
-    update_interval=4,
+    update_interval=8,
     grad_clip=None,
     coalesce=True,
     bucket_size_mb=-1,

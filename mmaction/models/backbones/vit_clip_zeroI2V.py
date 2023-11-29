@@ -23,12 +23,12 @@ class Linear_Adapter(nn.Module):
         
         # self.merged = False
         # self.merge_weights = merge_weights
-        def init_weights(self):
-            with torch.no_grad():
-                nn.init.kaiming_uniform_(self.D_fc1.weight, a=math.sqrt(5))
-                nn.init.zeros_(self.D_fc2.weight)
-                nn.init.zeros_(self.D_fc1.bias)
-                nn.init.zeros_(self.D_fc2.bias)
+    def init_weights(self):
+        with torch.no_grad():
+            nn.init.kaiming_uniform_(self.D_fc1.weight, a=math.sqrt(5))
+            nn.init.zeros_(self.D_fc2.weight)
+            nn.init.zeros_(self.D_fc1.bias)
+            nn.init.zeros_(self.D_fc2.bias)
         
     def forward(self, x):
         # x is (BT, HW+1, D)
@@ -135,7 +135,7 @@ class ResidualAttentionBlock(nn.Module):
                     self.MLP_Adapter_in=Linear_Adapter(d_model,self.bottleneck)
                     self.MLP_Adapter_out=Linear_Adapter(d_model,self.bottleneck)
                 else:
-                    self.S_Adapter = Adapter(d_model)
+                    self.S_Adapter = Adapter(d_model, skip_connect=False)
                     self.MLP_Adapter = Adapter(d_model, skip_connect=False)
                     
                 
@@ -294,7 +294,7 @@ class ResidualAttentionBlock(nn.Module):
                 if self.linear_adapter:
                     x= x + self.ths_attention(xln,True,self.share_adapter)
                 else:
-                    x= x + self.S_Adapter(self.attention(xln,xln,True))
+                    x= x + self.attention(xln,xln,True) + self.drop_path(self.scale * self.S_Adapter(x))
                 
                 
                 if self.with_t_cls_token:
@@ -603,41 +603,3 @@ class HeadShift(nn.Module):
         
         out = rearrange(out, ' b t h l c -> (b t) h l c ', t = num_frames)
         return out
-
-if __name__ == '__main__':
-
-    from mmengine.analysis import get_model_complexity_info
-
-    # backbone=dict(
-    #     type='ViT_CLIP_TPS',
-    #     pretrained='openaiclip',
-    #     input_resolution=224,
-    #     patch_size=16,
-    #     num_frames=32,
-    #     width=768,
-    #     layers=12,
-    #     heads=12,
-    #     drop_path_rate=0.1),
-
-    input_shape = (3,32,224,224)
-    model = ViT_CLIP_ZEROI2V(pretrained='openaiclip',
-                        input_resolution=224,
-                        adapter_scale=0.5,
-                        patch_size=16,
-                        num_frames=32,
-                        width=768,
-                        layers=12,
-                        heads=12,
-                        drop_path_rate=0.1,
-                        froze=True)
-
-    analysis_results = get_model_complexity_info(model, input_shape)
-
-
-    print(analysis_results['out_table'])
-
-    # print(analysis_results['out_arch'])
-
-    print(f"Model Flops:{analysis_results['flops_str']}")
-
-    print(f"Model Parameters:{analysis_results['params_str']}")

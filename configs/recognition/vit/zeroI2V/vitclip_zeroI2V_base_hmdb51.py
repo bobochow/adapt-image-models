@@ -5,7 +5,7 @@ _base_ = [
 model = dict(
     backbone=dict(type='ViT_CLIP_ZEROI2V',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,with_t_cls_token=True,linear_adapter=False,bottleneck=192,share_adapter=False,pretrained='openaiclip'),
     cls_head=dict(num_classes=51),
-    # test_cfg=dict(max_testing_views=4),
+    test_cfg=dict(max_testing_views=4),
     # train_cfg=dict(blending=dict(type='LabelSmoothing', num_classes=51, smoothing=0.02))
     )
 
@@ -92,13 +92,13 @@ batchsize=8*8
 data = dict(
     videos_per_gpu=batchsize,
     workers_per_gpu=2,
-    # val_dataloader=dict(
-    #     videos_per_gpu=1,
-    #     workers_per_gpu=1
-    # ),
+    val_dataloader=dict(
+        videos_per_gpu=1,
+        workers_per_gpu=1
+    ),
     test_dataloader=dict(
-        videos_per_gpu=32,
-        workers_per_gpu=2
+        videos_per_gpu=1,
+        workers_per_gpu=1
     ),
     train=dict(
         type=dataset_type,
@@ -141,13 +141,13 @@ lr_config = dict(
 total_epochs = 30
 
 # runtime settings
-checkpoint_config = dict(interval=10,max_keep_ckpts=1)
+checkpoint_config = dict(interval=5,max_keep_ckpts=1)
 
 find_unused_parameters = False
 
 
 project='vitclip_hmdb51'
-name='ths_ada_tcls_apex_gpunorm'
+name='ths_ada_restuning_apex_gpunorm'
 
 work_dir = f'./work_dirs/hmdb51/{project}/{name}'
 

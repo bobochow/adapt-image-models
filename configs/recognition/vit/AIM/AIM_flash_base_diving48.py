@@ -4,10 +4,10 @@ _base_ = [
 # model settings
 model = dict(
     backbone=dict(type='AIM_FLASH',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,pretrained='openaiclip',
-                use_flash_attn=True,checkpoint=False),
+                use_flash_attn=True,checkpoint=False,prompt=True,wind_attn=True,window_size= (32,2,2),not_shift=False,win_prompt=False),
     cls_head=dict(num_classes=48),
-    test_cfg=dict(max_testing_views=8)
-    )
+    # test_cfg=dict(max_testing_views=8)
+)
 
 module_hooks = [
     dict(
@@ -93,12 +93,12 @@ data = dict(
     videos_per_gpu=batchsize,
     workers_per_gpu=4,
     val_dataloader=dict(
-        videos_per_gpu=1,
-        workers_per_gpu=1
+        videos_per_gpu=batchsize,
+        workers_per_gpu=4
     ),
     test_dataloader=dict(
-        videos_per_gpu=1,
-        workers_per_gpu=1
+        videos_per_gpu=4*4,
+        workers_per_gpu=4
     ),
     train=dict(
         type=dataset_type,
@@ -117,14 +117,15 @@ data = dict(
         pipeline=test_pipeline))
 
 evaluation = dict(
-    interval=2, metrics=['top_k_accuracy', 'mean_class_accuracy'],save_best='mean_class_accuracy')
+    interval=2, metrics=['top_k_accuracy', 'mean_class_accuracy'],save_best='top1_acc')
 
 
 base_lr=3e-4
 
 actual_lr=base_lr*batchsize/64
+
 # optimizer
-optimizer = dict(type='AdamW', lr=actual_lr, betas=(0.9, 0.999), weight_decay=0.05,
+optimizer = dict(type='AdamW', lr=base_lr, betas=(0.9, 0.999), weight_decay=0.05,
                  paramwise_cfg=dict(custom_keys={'class_embedding': dict(decay_mult=0.),
                                                  'positional_embedding': dict(decay_mult=0.),
                                                  'ln_1': dict(decay_mult=0.),
@@ -137,18 +138,18 @@ lr_config = dict(
     min_lr=0,
     warmup='linear',
     warmup_by_epoch=True,
-    warmup_iters=3
+    warmup_iters=2.5
 )
 total_epochs = 50
 
 # runtime settings
-checkpoint_config = dict(interval=5,max_keep_ckpts=1)
+checkpoint_config = dict(interval=1,max_keep_ckpts=1)
 
 find_unused_parameters = False
 
 
 project='vitclip_diving48'
-name='aim_flash_apex_gpunorm'
+name='aim_flash_tcls_2x32_shift_apex_gpunorm'
 
 work_dir = f'./work_dirs/diving48/{project}/{name}'
 
@@ -160,7 +161,8 @@ log_config = dict(
         dict(
             type='WandbLoggerHook',
             init_kwargs=dict(
-                project=project, name=name
+                project=project, name=name,
+                resume=True,id = '7ahqj13s'
                 ),
             ),
         dict(type='TensorboardLoggerHook')

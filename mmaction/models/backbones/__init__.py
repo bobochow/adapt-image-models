@@ -22,10 +22,11 @@ from .vit_clip_flash import ViT_CLIP_FLASH
 from .vit_clip_flash_restuning import ViT_CLIP_FLASH_RES_TUNING
 from .vitclip_aim import AIM
 from .vitclip_aim_flash import AIM_FLASH
+from .vitclip_aim_flash_win import AIM_FLASH_WIN
 
 __all__ = [
     'C3D', 'ResNet', 'ResNet3d', 'ResNetTSM', 'ResNet2Plus1d',
     'ResNet3dSlowFast', 'ResNet3dSlowOnly', 'ResNet3dCSN', 'ResNetTIN', 'X3D',
     'ResNetAudio', 'ResNet3dLayer', 'MobileNetV2TSM', 'MobileNetV2', 'TANet', 'SwinTransformer3D', 'SwinTransformer2D', 'SwinTransformer2D_Adapter', 'ViT_CLIP', 'ViT_ImageNet',
-    'ViT_CLIP_ZEROI2V','ViT_CLIP_FLASH','ViT_CLIP_FLASH_RES_TUNING','AIM','AIM_FLASH'
+    'ViT_CLIP_ZEROI2V','ViT_CLIP_FLASH','ViT_CLIP_FLASH_RES_TUNING','AIM','AIM_FLASH','AIM_FLASH_WIN'
 ]

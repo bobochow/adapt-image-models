@@ -93,10 +93,11 @@ class ResidualAttentionBlock(nn.Module):
         
         # self.attn = nn.MultiheadAttention(d_model, n_head)
         self.use_flash_attn = use_flash_attn
-        if shift:
-            self.attn = FlashMHA(d_model, n_head, cross_attn=True, dropout=0., use_flash_attn=use_flash_attn)
-        else:
-            self.attn = FlashMHA(d_model, n_head, cross_attn=False, dropout=0., use_flash_attn=use_flash_attn)
+        # if shift:
+        #     self.attn = FlashMHA(d_model, n_head, cross_attn=True, dropout=0., use_flash_attn=use_flash_attn)
+        # else:
+        #     self.attn = FlashMHA(d_model, n_head, cross_attn=False, dropout=0., use_flash_attn=use_flash_attn)
+        self.attn = FlashMHA(d_model, n_head, cross_attn=True, dropout=0., use_flash_attn=use_flash_attn)
         
         self.ln_1 = LayerNorm(d_model)
         
@@ -130,31 +131,11 @@ class ResidualAttentionBlock(nn.Module):
         
         if self.shift:
             self.shift_op=PatchShift( inv=False)
-
-    # def attention(self, x: torch.Tensor):
-    #     self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
-    #     return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
-
-    # def cross_attention(self, q: torch.Tensor, k: torch.Tensor):
-    #     self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
-    #     return self.attn(q, k, k, need_weights=False, attn_mask=self.attn_mask)[0]
+            
+        self.prompt_weight=nn.Parameter(torch.zeros(1))
+        # self.prompt_weight=3e-3
     
-    def forward(self, x: torch.Tensor):
-        # ## x shape [HW+1, BT, D]
-        # n, bt, d = x.shape
-        # ## temporal adaptation
-        # xt = rearrange(x, 'n (b t) d -> t (b n) d', t=self.num_frames)
-        # if self.num_tadapter == 2:
-        #     xt = self.T_Adapter(self.attention(self.T_Adapter_in(self.ln_1(xt))))
-        # else:
-        #     xt = self.T_Adapter(self.attention(self.ln_1(xt)))
-        # xt = rearrange(xt, 't (b n) d -> n (b t) d', n=n)
-        # x = x + self.drop_path(xt)
-        # ## spatial adaptation
-        # x = x + self.S_Adapter(self.attention(self.ln_1(x)))
-        # ## joint adaptation
-        # xn = self.ln_2(x)
-        # x = x + self.mlp(xn) + self.drop_path(self.scale * self.MLP_Adapter(xn))
+    def forward(self, x: torch.Tensor, x_res: torch.Tensor):
         
         ## x shape [ BT, HW+1, D]
         bt, n, d = x.shape
@@ -167,12 +148,11 @@ class ResidualAttentionBlock(nn.Module):
         ln_xt=self.ln_1(xt)
         
         # if self.use_flash_attn:
-        if self.shift:
-            xt = self.T_Adapter(self.attn(x=ln_xt,x_kv=ln_xt))
-        else:
-            xt = self.T_Adapter(self.attn(ln_xt))
-        
-        # xt = self.avgpool(xt.permute(1,2,0))
+        # if self.shift:
+        #     xt = self.T_Adapter(self.attn(x=ln_xt,x_kv=ln_xt))
+        # else:
+        #     xt = self.T_Adapter(self.attn(ln_xt))
+        xt = self.T_Adapter(self.attn(x=ln_xt,x_kv=ln_xt))
         
         xt = rearrange(xt, '(b n) t d -> (b t) n d', n=1)
         # x = x + self.drop_path(xt)
@@ -194,21 +174,27 @@ class ResidualAttentionBlock(nn.Module):
             tmp_x = tmp_x.view(NT, C, -1).permute(0, 2, 1).contiguous() # P NT C
             # tmp_x = torch.cat([xln, tmp_x], dim=1)
             
-            x = x + self.attn(x=xln,x_kv=xln) + self.drop_path(self.scale * self.S_Adapter(self.attn(x=xln,x_kv=tmp_x)))
+            x = x + self.attn(x=xln,x_kv=xln) + self.drop_path(self.scale * self.S_Adapter(x))
+            
+            x_temporal = x + self.drop_path( self.scale * self.S_Adapter(self.attn(x=self.ln_1(x),x_kv=self.ln_1(tmp_x)))) + x_res
+            
             # x = x + self.S_Adapter(self.attn(x=xln,x_kv=tmp_x)) 
         else:
             ## spatial adaptation
             # x = x + self.drop_path(self.S_Adapter(self.attn(self.ln_1(x))))
             x = x + self.attn(self.ln_1(x)) + self.drop_path(self.scale * self.S_Adapter(x))
+            # x = x + (1 - self.prompt_weight) * self.attn(x=self.ln_1(x), x_kv=self.ln_1(x)) + self.drop_path(self.scale * self.S_Adapter(x)) + self.drop_path( self.prompt_weight * self.attn(x=self.ln_1(x), x_kv=xt))
         
         ## joint adaptation
         # x=x[:-1,:,:]
+        
         x= torch.cat([x[:, :1, :], x[:, 2:, :]], dim=1)
+        
         xn = self.ln_2(x)
         x = x + self.mlp(xn) + self.drop_path(self.scale * self.MLP_Adapter(xn))
         # x = x + self.mlp(xn) + self.drop_path(self.scale * self.MLP_Adapter(x))
         
-        return x
+        return x , x_temporal
 
 
 class Transformer(nn.Module):
@@ -239,11 +225,12 @@ class Transformer(nn.Module):
 
     def forward(self, x: torch.Tensor):
         
+        x_res = 0.0
         for r in self.resblocks:
             if self.checkpoint and not torch.jit.is_scripting():
-                x = checkpoint(r, x)
+                x, x_res = checkpoint(r, x, x_res)
             else:
-                x = r(x)
+                x, x_res = r(x, x_res)
         return x
         
         # return self.resblocks(x)
@@ -408,12 +395,17 @@ class ViT_CLIP_FLASH_RES_TUNING(nn.Module):
         x = self.ln_pre(x)
 
         # x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
+        x, x_t = self.transformer(x)
         # x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
+        x_t = self.ln_post(x_t)
         x = x[:, 0]
+        x_t=x_t[:, 0]
+        
+        x = torch.cat([x,x_t], dim=0)
+        
         x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
         
-        x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
+        x = x.unsqueeze(-1).unsqueeze(-1)  # B D T H W for I3D head
 
         return x

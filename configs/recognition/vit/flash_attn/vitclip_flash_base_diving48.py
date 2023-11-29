@@ -4,9 +4,9 @@ _base_ = [
 # model settings
 model = dict(
     backbone=dict(type='ViT_CLIP_FLASH',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,pretrained='openaiclip',
-                shift=False,use_flash_attn=True,checkpoint=True),
+                shift=True,use_flash_attn=True,checkpoint=False),
     cls_head=dict(num_classes=48),
-    test_cfg=dict(max_testing_views=4)
+    test_cfg=dict(max_testing_views=8)
     )
 
 module_hooks = [
@@ -32,7 +32,7 @@ img_norm_cfg = dict(
 train_pipeline = [
     # dict(type='DecordInit'),
     dict(type='FusedDecordInit',fast_rrc=True,rrc_params=(224, (0.5, 1.0)),hflip_prob=0.5),
-    dict(type='SampleFrames', clip_len=32, frame_interval=8, num_clips=1, frame_uniform=True),
+    dict(type='SampleFrames', clip_len=32, frame_interval=16, num_clips=1, frame_uniform=True),
     dict(type='DecordDecode'),
     # dict(type='Resize', scale=(-1, 256)),
     # dict(type='RandomResizedCrop', area_range=(0.5, 1.0)),
@@ -56,7 +56,7 @@ val_pipeline = [
     dict(
         type='SampleFrames',
         clip_len=32,
-        frame_interval=8,
+        frame_interval=16,
         num_clips=1,
         frame_uniform=True,
         test_mode=True),
@@ -74,7 +74,7 @@ test_pipeline = [
     dict(
         type='SampleFrames',
         clip_len=32,
-        frame_interval=8,
+        frame_interval=16,
         num_clips=1,
         frame_uniform=True,
         test_mode=True),
@@ -88,7 +88,7 @@ test_pipeline = [
     dict(type='ToTensor', keys=['imgs'])
 ]
 
-batchsize=8*32
+batchsize=4*12
 data = dict(
     videos_per_gpu=batchsize,
     workers_per_gpu=4,
@@ -117,10 +117,10 @@ data = dict(
         pipeline=test_pipeline))
 
 evaluation = dict(
-    interval=2, metrics=['top_k_accuracy', 'mean_class_accuracy'],save_best='top1_acc')
+    interval=2, metrics=['top_k_accuracy', 'mean_class_accuracy'],save_best='mean_class_accuracy')
 
 
-base_lr=1.5e-5
+base_lr=3e-4
 
 actual_lr=base_lr*batchsize/64
 # optimizer
@@ -148,7 +148,7 @@ find_unused_parameters = False
 
 
 project='vitclip_diving48'
-name='baseline_flash_apex_gpunorm_8x32'
+name='tps_restuning_flash_apex_gpunorm'
 
 work_dir = f'./work_dirs/diving48/{project}/{name}'
 
@@ -171,11 +171,11 @@ log_config = dict(
 fp16 = None
 optimizer_config = dict(
     type="DistOptimizerHook",
-    update_interval=8,
+    update_interval=4,
     grad_clip=None,
     coalesce=True,
     bucket_size_mb=-1,
     use_fp16=True,
 )
 
-workflow = [('train', 1), ('val', 1)]
+# workflow = [('train', 1), ('val', 1)]
