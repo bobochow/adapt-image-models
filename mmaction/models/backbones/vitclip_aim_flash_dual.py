@@ -98,24 +98,18 @@ class QuickGELU(nn.Module):
 
 
 class ResidualAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,use_flash_attn: bool = True,
-                prompt=True,wind_attn=False,window_size=(32,2,2),shift_size=(0,0,0)):    
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_frames=8, drop_path=0.,use_flash_attn: bool = True,
+                prompt=True,window_size=(32,2,2)):    
         super().__init__()
-        self.num_tadapter = num_tadapter
-        # self.attn = nn.MultiheadAttention(d_model, n_head)
+        
         
         self.use_flash_attn = use_flash_attn
         self.attn = FlashMHA(d_model, n_head, cross_attn=False, dropout=0., use_flash_attn=use_flash_attn)
         
-        
         self.ln_1 = LayerNorm(d_model)
         mlp_width = int(d_model * 4)
         self.mlp = FlashMlp(d_model, hidden_features=mlp_width, activation=QuickGELU())
-        # self.mlp = nn.Sequential(OrderedDict([
-        #     ("c_fc", nn.Linear(d_model, d_model * 4)),
-        #     ("gelu", QuickGELU()),
-        #     ("c_proj", nn.Linear(d_model * 4, d_model))
-        # ]))
+        
         self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
         self.n_head = n_head
@@ -124,121 +118,82 @@ class ResidualAttentionBlock(nn.Module):
         self.S_Adapter = Adapter(d_model, skip_connect=False)
         self.scale = scale
         self.T_Adapter = Adapter(d_model, skip_connect=False)
-        if num_tadapter == 2:
-            self.T_Adapter_in = Adapter(d_model)
+        
         self.num_frames = num_frames
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         
-        
         self.prompt=prompt
         
-        self.wind_attn=wind_attn
-        if self.wind_attn:
-            self.window_size = window_size
-            self.shift_size = shift_size
+        self.window_size = window_size
         
-
-
-    # def attention(self, x: torch.Tensor):
-    #     self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
-    #     return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
-
-    def forward(self, x: torch.Tensor):
-        if not self.wind_attn:
-            ## x shape [ BT, HW+1, D]
-            bt, n, d = x.shape
-            ## temporal adaptation
-            xt = rearrange(x, '(b t) n d -> (b n) t d', t=self.num_frames)
-            if self.num_tadapter == 2:
-                xt = self.T_Adapter(self.attn(self.T_Adapter_in(self.ln_1(xt))))
-            else:
-                xt = self.T_Adapter(self.attn(self.ln_1(xt)))
-            xt = rearrange(xt, '(b n) t d -> (b t) n d', n=n)
-        else:
-            # window local attention
-            cls_token,windows=x[:,:1,:],x[:,1:,:]
-            
-            BT, L, C = windows.shape
-            T = self.num_frames
-            B = BT // self.num_frames
-            H = W = int(L ** 0.5)
-
-            window_size, shift_size = get_window_size((T, H, W), self.window_size, self.shift_size)
-
-            windows = rearrange(windows, '(b t) (h w) c -> b t h w c', t=self.num_frames, h=H, w=W)
-
-            _, Dp, Hp, Wp, _ = windows.shape
-            
-            if any(i > 0 for i in shift_size):
-                shifted_win = torch.roll(windows, shifts=(-shift_size[0], -shift_size[1], -shift_size[2]), dims=(1, 2, 3))
-                
-            else:
-                shifted_win = windows
-            
-            shifted_win = window_partition(shifted_win, window_size)  # B*nW, Wd*Wh*Ww, C
-            
-            shifted_win=self.attn(self.ln_1(shifted_win))
-            
-            shifted_win = shifted_win.view(-1, *(window_size+(C,)))
-            
-            shifted_win = window_reverse(shifted_win, window_size, B, Dp, Hp, Wp) # (B, D, H, W, C)
-            
-            # reverse cyclic shift
-            if any(i > 0 for i in shift_size):
-                windows_attn = torch.roll(shifted_win, shifts=(shift_size[0], shift_size[1], shift_size[2]), dims=(1, 2, 3))
-            else:
-                windows_attn = shifted_win
-            
-            windows_attn = rearrange(shifted_win, 'b t h w c -> (b t) (h w) c')
-            
-            cls_token = rearrange(cls_token, '(b t) n d -> (b n) t d', t=self.num_frames)
-            cls_attn = self.attn(self.ln_1(cls_token))
-            cls_attn = rearrange(cls_attn, '(b n) t d -> (b t) n d', n=1)
-            xt = torch.cat([cls_attn,windows_attn],dim=1)
-            xt = self.T_Adapter(xt)
+    def forward(self, x: torch.Tensor, xt):
         
-        x = x + self.drop_path(xt)
+        with torch.no_grad():
+            x = x + self.attn(self.ln_1(x))
+            
+            x = x + self.mlp(self.ln_2(x))
+            
+        # xt = xt + x
+        # window local attention
+        cls_token,windows=xt[:,:1,:],xt[:,1:,:]
         
+        BT, L, C = windows.shape
+        T = self.num_frames
+        B = BT // self.num_frames
+        H = W = int(L ** 0.5)
+        window_size, _ = get_window_size((T, H, W), self.window_size, (0,0,0))
+        windows = rearrange(windows, '(b t) (h w) c -> b t h w c', t=self.num_frames, h=H, w=W)
+        _, Dp, Hp, Wp, _ = windows.shape
         
-        # temporal class token prompt adaptation
-        # t_cls=xt[:,:1,:]
-        if self.prompt:
-            if self.wind_attn:
-                tcls_prompt=cls_attn
-            else:
-                tcls_prompt=xt[:,:1,:]
-            x = torch.cat([x[:, :1, :], tcls_prompt, x[:, 1:, :]], dim=1) # BT HW+1+prompt D
+        shifted_win = window_partition(windows, window_size)  # B*nW, Wd*Wh*Ww, C
         
-        ## spatial adaptation
-        # x = x + self.S_Adapter(self.attn(self.ln_1(x)))
+        nW=shifted_win.shape[0]//B
+        nWt=T//window_size[0]
+        win_p = rearrange(cls_token, '(b nWt wt) l c -> b nWt wt l c', b=B, nWt=nWt, wt=window_size[0])
+        win_p = win_p.expand(-1, -1, -1, nW//nWt, -1).permute(0,1,3,2,4).reshape(-1,window_size[0], C)
+        shifted_win = torch.cat([win_p, shifted_win], dim=1)
         
-        x = x + self.attn(self.ln_1(x)) + self.drop_path(self.scale * self.S_Adapter(x))
+        shifted_attn=self.attn(self.ln_1(shifted_win))
         
-        if self.prompt:
-            x = torch.cat([x[:, :1, :], x[:, 2:, :]], dim=1)
+        shifted_win = shifted_attn[:, window_size[0]:, :]
+        win_p = shifted_win[:, :window_size[0], :] # B*nW, window_size[0] , C
+        win_p = win_p.view(B, nWt, nW//nWt, -1, C) 
+        win_p = rearrange(win_p, 'b nWt Wh l c -> (b nWt l) Wh c') # BT, nWh, c
+        win_p=win_p.mean(dim=1)
         
-        # x = x + self.drop_path(xt)
+        shifted_win = shifted_win.view(-1, *(window_size+(C,)))
         
-        ## joint adaptation
-        xn = self.ln_2(x)
-        x = x + self.mlp(xn) + self.drop_path(self.scale * self.MLP_Adapter(xn))
-        return x
+        shifted_win = window_reverse(shifted_win, window_size, B, Dp, Hp, Wp) # (B, D, H, W, C)
+        
+        windows_attn = rearrange(shifted_win, 'b t h w c -> (b t) (h w) c')
+        
+        cls_token = rearrange(win_p, '(b t) n d -> (b n) t d', t=self.num_frames)
+        cls_attn = self.attn(self.ln_1(cls_token))
+        cls_attn = rearrange(cls_attn, '(b n) t d -> (b t) n d', n=1)
+        
+        xt = torch.cat([cls_attn,windows_attn],dim=1)
+        xt = self.T_Adapter(xt)
+        
+        xt = xt + self.scale * self.S_Adapter(x)
+        
+        xt = xt + self.mlp(self.ln_2(xt))+ self.drop_path(self.scale * self.MLP_Adapter(xt))
+        
+        return x ,xt
 
 
 class Transformer(nn.Module):
-    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, num_tadapter=1, scale=1., drop_path=0.1,
-                 checkpoint=False,use_flash_attn=True,prompt=True,wind_attn=False,window_size= (32,2,2),not_shift=True):
+    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, scale=1., drop_path=0.1,
+                use_flash_attn=True,prompt=True,window_size= (32,2,2)):
         super().__init__()
         self.width = width
         self.layers = layers
-        self.checkpoint=checkpoint
+        self.num_frames=num_frames
+        
         dpr = [x.item() for x in torch.linspace(0, drop_path, self.layers)]
         
         # window_size=(8, 7, 7) if i <= 5 else (32, 2, 2)
         # window_size = (32, 2, 2) if i <= 3 else ((16, 7, 7) if 3 < i <= 7 else (4, 14, 14)),
         self.window_size = window_size
-        
-        self.shift_size = (0, 0, window_size[2]//2)
         
         # self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],use_flash_attn, prompt, wind_attn) for i in range(layers)])
         
@@ -249,35 +204,40 @@ class Transformer(nn.Module):
                     heads,
                     attn_mask,
                     scale,
-                    num_tadapter,
                     num_frames,
                     dpr[i],
                     use_flash_attn,
                     prompt,
-                    wind_attn,
-                    window_size = self.window_size,
-                    shift_size=(0,0,0) if (i % 2 == 0) or not_shift else self.shift_size,
-                    # window_size = (32, 2, 2) if i %2 ==0 else (16, 7, 7),
+                    window_size = self.window_size
+                    # window_size = (32, 2, 2) if i <= 6 else (16, 7, 7),
                 )
                 for i in range(layers)
             ]
         )
         
     def forward(self, x: torch.Tensor):
+        xt = x
         for r in self.resblocks:
-            if self.checkpoint and not torch.jit.is_scripting():
-                x = checkpoint(r, x)
-            else:
-                x = r(x)
-        return x
+            x, xt= r(x,xt)
+        
+        xt = x + xt
+        
+        # x = rearrange(x, '(b t) n d -> b t n d',t=self.num_frames)
+        # xt = rearrange(xt, '(b t) n d -> b t n d',t=self.num_frames)
+        
+        # out = torch.cat([x,xt],dim=1)
+        
+        # out = rearrange(out, 'b t n d -> (b t) n d')
+        
+        return xt
         # return self.resblocks(x)
 
 
 @BACKBONES.register_module()
-class AIM_FLASH_WIN(nn.Module):
+class AIM_FLASH_DUAL(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,
-                 checkpoint=False,use_flash_attn=True,prompt=True,wind_attn=False,window_size= (32,2,2),not_shift=True):
+                use_flash_attn=True,prompt=True,window_size= (32,2,2)):
         super().__init__()
         self.input_resolution = input_resolution
         self.pretrained = pretrained
@@ -292,8 +252,8 @@ class AIM_FLASH_WIN(nn.Module):
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
 
-        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,checkpoint=checkpoint,
-                                       use_flash_attn=use_flash_attn,prompt=prompt,wind_attn=wind_attn, window_size= window_size,not_shift=not_shift )
+        self.transformer = Transformer(num_frames, width, layers, heads, scale=adapter_scale, drop_path=drop_path_rate,
+                                       use_flash_attn=use_flash_attn,prompt=prompt, window_size= window_size, )
 
         self.ln_post = LayerNorm(width)
 
@@ -421,13 +381,14 @@ class AIM_FLASH_WIN(nn.Module):
             
         x = self.ln_pre(x)
 
-        # x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
-        # x = x.permute(1, 0, 2)  # LND -> NLD
+        
         x = self.ln_post(x)
         x = x[:, 0]
-        x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
+        x = rearrange(x, '(b t) d -> b d t',b=B)
         
         x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
 
+        # x = rearrange(x, '(b t) (h w) d -> b d n t',b=B)
+        
         return x

@@ -361,6 +361,7 @@ class Transformer(nn.Module):
         self.window_size = window_size
         
         self.shift_size = tuple(i // 2 for i in window_size)
+        # self.shift_size = (0, 0, window_size[2]//2)
         
         
         # self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],use_flash_attn, prompt, wind_attn) for i in range(layers)])

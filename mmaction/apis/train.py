@@ -187,7 +187,8 @@ def train_model(model,
         runner.register_hook(eval_hook)
 
     if cfg.resume_from:
-        runner.resume(cfg.resume_from, resume_amp=use_amp)
+        # runner.resume(cfg.resume_from, resume_amp=use_amp)
+        runner.resume(cfg.resume_from)
     elif cfg.get("auto_resume", False) and osp.exists(osp.join(runner.work_dir, 'latest.pth')):
         runner.auto_resume()
     elif cfg.load_from:

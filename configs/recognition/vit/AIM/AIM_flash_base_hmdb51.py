@@ -4,7 +4,7 @@ _base_ = [
 # model settings
 model = dict(
     backbone=dict(type='AIM_FLASH',drop_path_rate=0.2, adapter_scale=0.5, num_frames=32,pretrained='openaiclip',
-                use_flash_attn=True,checkpoint=False,prompt=True,wind_attn=True,window_size= (16,7,7),not_shift=True,win_prompt=True),
+                use_flash_attn=True,checkpoint=False,prompt=True,wind_attn=True,window_size= (16,7,7),not_shift=False,win_prompt=False),
     cls_head=dict(num_classes=51),
     # test_cfg=dict(max_testing_views=8)
     )
@@ -89,8 +89,7 @@ test_pipeline = [
     dict(type='ToTensor', keys=['imgs'])
 ]
 
-batchsize=8*8
-gpu_nums=2
+batchsize=4*8
 data = dict(
     videos_per_gpu=batchsize,
     workers_per_gpu=2,
@@ -124,14 +123,13 @@ evaluation = dict(
 
 base_lr=3e-4
 
-actual_lr=base_lr*batchsize*gpu_nums/64
 
 # base_lr=1e-4
 
 # actual_lr=base_lr*batchsize/128
 
 # optimizer
-optimizer = dict(type='AdamW', lr=actual_lr, betas=(0.9, 0.999), weight_decay=5e-2,
+optimizer = dict(type='AdamW', lr=base_lr, betas=(0.9, 0.999), weight_decay=5e-2,
                  paramwise_cfg=dict(custom_keys={'class_embedding': dict(decay_mult=0.),
                                                  'positional_embedding': dict(decay_mult=0.),
                                                  'ln_1': dict(decay_mult=0.),
@@ -156,7 +154,7 @@ find_unused_parameters = False
 
 
 project='vitclip_hmdb51'
-name='aim_flash_tcls_7x16_apex_gpunorm_win_prompt_exp3'
+name='aim_flash_tcls_7x16_tshift_apex_gpunorm'
 
 work_dir = f'./work_dirs/hmdb51/{project}/{name}'
 
@@ -166,14 +164,13 @@ log_config = dict(
     hooks=[
         dict(type='TextLoggerHook', by_epoch=True,
             ),
-        dict(
-            type='WandbLoggerHook',
-            init_kwargs=dict(
-                project=project, name=name,
-                resume=True,id='717ysu26'
-                ),
-            ),
-        dict(type='TensorboardLoggerHook')
+        # dict(
+        #     type='WandbLoggerHook',
+        #     init_kwargs=dict(
+        #         project=project, name=name,
+        #         ),
+        #     ),
+        # dict(type='TensorboardLoggerHook')
         ]
     )
 
@@ -181,7 +178,7 @@ log_config = dict(
 fp16 = None
 optimizer_config = dict(
     type="DistOptimizerHook",
-    update_interval=8,
+    update_interval=4,
     grad_clip=None,
     coalesce=True,
     bucket_size_mb=-1,
